@@ -7,7 +7,9 @@ Serialize directly**, so the model can evolve without breaking files.
 
 Dispatch: `io::load(path)` / `io::save(doc, path)` pick the format from the
 extension (`Format::from_path`): `.balina`/`.json` → native, `.xml`/`.bif`/
-`.xmlbif` → XMLBIF, `.xdsl` → XDSL. `load_str`/`save_str` exist for tests.
+`.xmlbif` → XMLBIF, `.xdsl` → XDSL, `.balpck` → `Format::Pack` (binary:
+the text `load_str`/`save_str` reject it; see the pack section).
+`load_str`/`save_str` exist for tests.
 `save` returns `Vec<Warning>` — currently only `Warning::Lossy(String)`,
 which the app prints to the message log.
 
@@ -24,10 +26,12 @@ Versioned JSON:
 ```json
 {
   "format": "balina-project", "version": 1,
+  "uid": "3f9a1c07e2b4d815",      // project identity (ties the .baltsv to it)
   "active_tab": 0,
   "tabs": [
     {
-      "label": "Asia", "name": "Chest Clinic (Asia)", "comment": "",
+      "label": "Asia", "uid": "9c41e0d27a3b5f60",   // tab identity (keys its data)
+      "name": "Chest Clinic (Asia)", "comment": "",
       "nodes": [
         { "name": "VisitAsia", "title": "", "kind": "Chance",
           "states": [{"name": "yes", "value": null}, {"name": "no", "value": null}],
@@ -56,6 +60,10 @@ Versioned JSON:
   sessions). Rename-then-save is fine because saving re-derives the map from
   live NodeIds.
 - XMLBIF/XDSL drop per-node `precision` silently, like `display`/`color`.
+- `uid`s are 16 hex digits. Files saved before they existed load with
+  empty ones; the session generates them silently (not a modification), so
+  they appear on the next save. New and duplicated tabs get fresh uids;
+  Save As keeps the project's. Both are omitted when empty.
 - Not yet persisted: evidence, camera, net-level window state (ROADMAP).
 
 ## XMLBIF v0.3 (io/xmlbif.rs)
@@ -92,6 +100,61 @@ Header row of node names (case-insensitive match); `IDnum` column ignored;
 `NumCases`/`__count` column = case weight; missing markers: empty, `*`, `?`,
 `NA`. Values are state names or bare indices. `write_cases` emits state
 names and adds `NumCases` only when weights are non-uniform.
+
+## Data sidecar `.baltsv` (io/baltsv.rs)
+
+The case data attached to tabs (by Learn CPTs, Learn Structure, Simulate or
+Cases > Attach Data). Desktop saves of `<stem>.balina` write it as
+`<stem>.baltsv` beside the project (only when the data changed or the file is
+missing; atomically via `<stem>.baltsv.tmp` + rename), and opening a
+`.balina` attaches a sidecar whose project uid matches. With no data left, a
+sidecar with this project's uid is deleted on save. XMLBIF/XDSL saves never
+write one (a warning says so).
+
+UTF-8 text, LF line ends (CRLF accepted), no BOM. Lines starting with `#`
+are structure, every other line is data; fields are TAB-separated (shown as
+`⇥`):
+
+```
+#BALTSV⇥1
+#project⇥3f9a1c07e2b4d815
+#section⇥9c41e0d27a3b5f60⇥offset=0000000000000431⇥bytes=0000000000183920⇥rows=5000⇥cols=8⇥origin=learn-cpts⇥source=asia.csv⇥created=2026-11-23T10:04:00Z⇥name=Asia
+#end-header
+#====⇥9c41e0d27a3b5f60⇥Asia
+VisitAsia⇥Smoking⇥…        ← column names (not counted in rows)
+yes⇥no⇥…
+```
+
+- One `#section` line per tab with data: tab uid, then `key=value` fields.
+  `offset` (from the start of the file) points at the section's `#====`
+  marker line; `bytes` spans the marker through the last row. Both are
+  zero-padded to 16 digits so the header's size is known before writing.
+  `origin` is `learn-cpts` / `learn-structure` / `simulate` / `attach`;
+  `source` (file name), `created` (RFC 3339 UTC) and `name` (the tab name,
+  informational) are optional. Unknown keys are ignored.
+- Valid = magic line with a version ≤ 1, and (for discovery) a matching
+  project uid. The sections must tile the file exactly (each starts where
+  the previous one ended, the last ends at EOF) with every offset on its
+  marker; otherwise (a hand edit changed some section's length) the reader
+  rebuilds the section table by scanning for `#====` lines and warns.
+- Cells are the **raw** source values (continuous values, `IDnum`,
+  `NumCases`, columns matching no node — all kept), parsed exactly like
+  learning parses them (sniffed/forced delimiter, BOM stripped, trimmed);
+  missing markers stay verbatim. Escapes: `\t \n \r \\`, and a line
+  whose first cell starts with `#` writes it as `\#`. Header values use the
+  same escapes.
+- No row index is stored: readers build a sparse in-memory index (byte
+  offset every 256 rows) to fetch row windows on demand.
+
+## Pack `.balpck` (io/pack.rs)
+
+A zip for sharing a project with its data (the only way the web build keeps
+data). Entries in order: `mimetype` (stored, `application/x-balina-pack`,
+ODF-style so the file is recognizable from its first bytes),
+`project.balina` (the native JSON) and, when any tab has data,
+`data.baltsv` (both deflated, `zip` crate with the pure-Rust zlib-rs
+backend so it builds for wasm). Re-saving a pack whose data did not change
+copies `data.baltsv` raw, without recompressing.
 
 ## Round-trip guarantees (enforced in tests/feature_tests.rs)
 

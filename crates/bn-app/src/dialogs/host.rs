@@ -79,6 +79,9 @@ fn render_dialog(dialog: DialogDesc) -> Element {
         DialogDesc::RenameTab { id } => rsx! {
             crate::dialogs::misc::RenameTabDialog { id }
         },
+        DialogDesc::DataSectionPick { tab } => rsx! {
+            crate::dialogs::data_section_pick::DataSectionPickDialog { tab }
+        },
         DialogDesc::About => rsx! {
             crate::dialogs::misc::AboutDialog {}
         },

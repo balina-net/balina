@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use slotmap::SlotMap;
 
+use crate::data::{SidecarState, TabData};
 use crate::doc::{Dirt, Document};
 use crate::engine_bridge::EngineBridge;
 
@@ -17,19 +18,37 @@ slotmap::new_key_type! {
 }
 
 /// One tab: a network document + its inference bridge + its background-job
-/// cancel flag.
+/// cancel flag + its attached case data.
 pub struct Tab {
+    /// Persistent identity, saved in the project file; keys the tab's
+    /// section of the `.baltsv` data sidecar.
+    pub uid: String,
     pub doc: Document,
     pub bridge: EngineBridge,
     /// Cancel flag of the in-flight background job (structure learning), if
     /// any. `Some` doubles as the "busy" marker.
     pub job_cancel: Option<Arc<AtomicBool>>,
+    /// Case data attached to this tab. Lives outside `doc`, so it is not
+    /// part of undo.
+    pub data: Option<TabData>,
 }
 
 impl Tab {
     pub fn new() -> Tab {
-        Tab { doc: Document::new(), bridge: EngineBridge::default(), job_cancel: None }
+        Tab {
+            uid: new_uid(),
+            doc: Document::new(),
+            bridge: EngineBridge::default(),
+            job_cancel: None,
+            data: None,
+        }
     }
+}
+
+/// A fresh 16-hex-digit identity for a tab or project.
+pub fn new_uid() -> String {
+    use rand::RngExt;
+    format!("{:016x}", rand::rng().random::<u64>())
 }
 
 impl Default for Tab {
@@ -47,6 +66,11 @@ pub struct Session {
     pub path: Option<PathBuf>,
     /// Project-level dirty flag (set by any tab mutation or tab add/remove).
     pub modified: bool,
+    /// Persistent project identity (ties a `.baltsv` sidecar to it).
+    pub uid: String,
+    /// What the data file on disk last held, so saves can skip rewriting
+    /// unchanged data.
+    pub(crate) sidecar: Option<SidecarState>,
 }
 
 impl Default for Session {
@@ -59,7 +83,15 @@ impl Session {
     pub fn new() -> Session {
         let mut tabs = SlotMap::with_key();
         let id = tabs.insert(Tab::new());
-        Session { tabs, active: id, order: vec![id], path: None, modified: false }
+        Session {
+            tabs,
+            active: id,
+            order: vec![id],
+            path: None,
+            modified: false,
+            uid: new_uid(),
+            sidecar: None,
+        }
     }
 
     // ---- active-tab accessors (used by all ops) ----------------------------
@@ -173,9 +205,12 @@ impl Session {
         self.active = id;
         self.path = None;
         self.modified = false;
+        self.uid = new_uid();
+        self.sidecar = None;
     }
 
-    /// Replace all tabs from a loaded project. Caller provides pre-built tabs.
+    /// Replace all tabs from a loaded project. Caller provides pre-built tabs
+    /// (with their uids) and sets `uid` afterwards.
     pub fn load_tabs(&mut self, tabs: Vec<Tab>, active_index: usize) {
         self.tabs.clear();
         self.order.clear();
@@ -186,5 +221,6 @@ impl Session {
         let idx = active_index.min(self.order.len().saturating_sub(1));
         self.active = self.order[idx];
         self.modified = false;
+        self.sidecar = None;
     }
 }

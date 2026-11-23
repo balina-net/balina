@@ -1,10 +1,11 @@
 //! Status bar: network name + modified marker, compile state, P(findings),
-//! node/link counts, last update time, message-log toggle.
+//! node/link counts, data-job progress, last update time, data-panel and
+//! message-log toggles.
 
 use dioxus::prelude::*;
 
 use crate::logic::format::exp4;
-use crate::state::{SESSION, SHOW_MESSAGES};
+use crate::state::{DataJobKind, DATA_JOBS, SESSION, SHOW_DATA_PANEL, SHOW_MESSAGES};
 
 #[component]
 pub fn StatusBar() -> Element {
@@ -20,6 +21,15 @@ pub fn StatusBar() -> Element {
     let last_ms = s.bridge().last_compile_ms;
     drop(s);
     let show_messages = *SHOW_MESSAGES.read();
+    let show_data = *SHOW_DATA_PANEL.read();
+    // Conversions and pack extraction (indexing is shown in the panel).
+    let data_job = DATA_JOBS.read().iter().find(|j| j.kind != DataJobKind::Index).map(|j| {
+        let what = if j.kind == DataJobKind::Extract { "Loading data" } else { "Preparing data" };
+        match j.frac {
+            Some(f) => format!("{what}… {:.0}%", f * 100.0),
+            None => format!("{what}…"),
+        }
+    });
 
     rsx! {
         div { class: "flex h-7 shrink-0 items-center gap-2 border-t px-2 text-xs",
@@ -44,8 +54,21 @@ pub fn StatusBar() -> Element {
             div { class: "h-4 w-px bg-border" }
             span { "{n_nodes} nodes, {n_edges} links" }
             div { class: "ml-auto flex items-center gap-2",
+                if let Some(job) = data_job {
+                    span { class: "text-muted-foreground", "{job}" }
+                }
                 if compiled {
                     span { class: "text-muted-foreground", "update {last_ms:.2} ms" }
+                }
+                button {
+                    class: if show_data {
+                        "flex items-center gap-0.5 rounded bg-accent px-1"
+                    } else {
+                        "flex items-center gap-0.5 rounded px-1 hover:bg-accent"
+                    },
+                    title: "Show or hide the data panel",
+                    onclick: move |_| crate::data::toggle_panel(),
+                    if show_data { "▸ data" } else { "◂ data" }
                 }
                 button {
                     class: "flex items-center gap-0.5 rounded px-1 hover:bg-accent",

@@ -1,22 +1,26 @@
 //! File open/save flows: rfd native pickers in-process, then plain
-//! path-taking session ops.
+//! path-taking session ops. Case data follows the project: opening brings
+//! its sidecar or pack data along (`crate::data::after_open`), and saving
+//! waits for data still being prepared.
 
 use std::path::PathBuf;
 
 use bn_session::ops;
 use dioxus::prelude::*;
 
-use crate::state::{exec, log_message, SESSION};
+use crate::state::{exec, log_message, DATA_BANNER, SESSION};
 
 const OPEN_FILTERS: &[(&str, &[&str])] = &[
-    ("All networks", &["balina", "json", "xml", "bif", "xmlbif", "xdsl"]),
+    ("All networks", &["balina", "balpck", "json", "xml", "bif", "xmlbif", "xdsl"]),
     ("Balina", &["balina", "json"]),
+    ("Balina pack (project + data)", &["balpck"]),
     ("XMLBIF", &["xml", "bif", "xmlbif"]),
     ("XDSL (GeNIe)", &["xdsl"]),
 ];
 
 const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("Balina", &["balina"]),
+    ("Balina pack (project + data)", &["balpck"]),
     ("XMLBIF", &["xmlbif", "xml"]),
     ("XDSL (GeNIe)", &["xdsl"]),
 ];
@@ -49,6 +53,7 @@ pub fn file_new() {
             ops::file::doc_new(s);
             Ok(())
         });
+        *DATA_BANNER.write() = None;
         crate::state::clear_selection();
         crate::chrome::menu::sync_auto_update_item(true);
         log_message("New network.");
@@ -84,6 +89,8 @@ pub fn open_recent(path: PathBuf) {
 pub fn open_path(path: PathBuf) {
     let recent = path.clone();
     if exec(|s| ops::file::doc_open(s, path)).is_some() {
+        *DATA_BANNER.write() = None;
+        crate::data::after_open(&recent);
         crate::chrome::recent::add(&recent);
         crate::state::clear_selection();
         *crate::canvas::controller::FIT_REQUEST.write() += 1;
@@ -112,9 +119,14 @@ pub fn file_save(save_as: bool) {
             let Some(fh) = picked else { return };
             path = Some(fh.path().to_path_buf());
         }
+        // Data still being prepared must make it into this save.
+        crate::data::wait_for_data_jobs().await;
         if let Some(result) = exec(|s| ops::file::doc_save(s, path)) {
             for w in &result.warnings {
                 log_message(format!("Warning: {w}"));
+            }
+            for n in &result.notes {
+                log_message(n.clone());
             }
             crate::chrome::recent::add(&result.path);
             log_message(format!("Saved {}.", result.path.display()));

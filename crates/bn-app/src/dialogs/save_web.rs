@@ -1,14 +1,18 @@
 //! Web save dialog: filename + format, then a blob download (browsers have
-//! no native save picker we can rely on cross-engine).
+//! no native save picker we can rely on cross-engine). Case data is only
+//! kept by `.balpck`, so that format is preselected when any tab has data.
 
 use bn_core::io;
 use dioxus::prelude::*;
 
 use crate::state::{close_dialog, exec, log_message, SESSION};
+
+const PACK_IDX: usize = 1;
 use crate::ui::{Modal, TextInput, BTN, BTN_PRIMARY, SELECT};
 
 const FORMATS: &[(io::Format, &str, &str)] = &[
     (io::Format::NativeJson, "Balina (.balina)", "balina"),
+    (io::Format::Pack, "Balina pack with data (.balpck)", "balpck"),
     (io::Format::Xmlbif, "XMLBIF (.xmlbif)", "xmlbif"),
     (io::Format::Xdsl, "XDSL / GeNIe (.xdsl)", "xdsl"),
 ];
@@ -16,20 +20,26 @@ const FORMATS: &[(io::Format, &str, &str)] = &[
 #[component]
 pub fn SaveAsWebDialog() -> Element {
     let mut name = use_signal(|| SESSION.read().doc().net.name.clone());
-    let mut fmt_idx = use_signal(|| 0usize);
+    let has_data = bn_session::ops::data::any_data(&SESSION.read());
+    let mut fmt_idx = use_signal(move || if has_data { PACK_IDX } else { 0usize });
 
     let save = move |_| {
         let (fmt, _, ext) = FORMATS[*fmt_idx.read()];
         let base = name.read().trim().to_string();
         let base = if base.is_empty() { "network".to_string() } else { base };
-        let Some((text, warnings)) = exec(|s| bn_session::ops::file::doc_save_str(s, fmt)) else {
-            return;
-        };
-        for w in &warnings {
-            log_message(format!("Warning: {w}"));
-        }
         let filename = format!("{base}.{ext}");
-        crate::platform::download(&filename, "application/octet-stream", text.as_bytes());
+        if fmt == io::Format::Pack {
+            let Some(bytes) = exec(bn_session::ops::file::doc_save_pack_bytes) else { return };
+            crate::platform::download(&filename, "application/zip", &bytes);
+        } else {
+            let Some((text, warnings)) = exec(|s| bn_session::ops::file::doc_save_str(s, fmt)) else {
+                return;
+            };
+            for w in &warnings {
+                log_message(format!("Warning: {w}"));
+            }
+            crate::platform::download(&filename, "application/octet-stream", text.as_bytes());
+        }
         log_message(format!("Saved {filename} (downloaded)."));
         close_dialog();
     };
@@ -66,6 +76,11 @@ pub fn SaveAsWebDialog() -> Element {
                         for (i, (_, label, _)) in FORMATS.iter().enumerate() {
                             option { value: "{i}", selected: *fmt_idx.read() == i, "{label}" }
                         }
+                    }
+                }
+                if has_data && *fmt_idx.read() != PACK_IDX {
+                    p { class: "text-xs text-amber-700",
+                        "Case data attached to tabs is only kept in a .balpck file."
                     }
                 }
                 p { class: "text-xs text-muted-foreground",

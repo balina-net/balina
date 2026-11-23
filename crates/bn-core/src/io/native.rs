@@ -19,6 +19,8 @@ pub const VERSION: u32 = 1;
 struct ProjectDto {
     format: String,
     version: u32,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    uid: String,
     #[serde(default)]
     active_tab: usize,
     tabs: Vec<TabDto>,
@@ -28,6 +30,8 @@ struct ProjectDto {
 struct TabDto {
     #[serde(default)]
     label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    uid: String,
     #[serde(default)]
     name: String,
     #[serde(default)]
@@ -71,18 +75,19 @@ pub fn project_to_json(project: &Project) -> Result<String, IoError> {
     let tabs: Vec<TabDto> = project
         .sheets
         .iter()
-        .map(|sheet| tab_to_dto(&sheet.doc, &sheet.label))
+        .map(|sheet| tab_to_dto(&sheet.doc, &sheet.label, &sheet.uid))
         .collect();
     let dto = ProjectDto {
         format: FORMAT_TAG.into(),
         version: VERSION,
+        uid: project.uid.clone(),
         active_tab: project.active,
         tabs,
     };
     Ok(serde_json::to_string_pretty(&dto)?)
 }
 
-fn tab_to_dto(doc: &Document, label: &str) -> TabDto {
+fn tab_to_dto(doc: &Document, label: &str, uid: &str) -> TabDto {
     let net = &doc.network;
     let nodes: Vec<NodeDto> = net
         .topo_order()
@@ -104,6 +109,7 @@ fn tab_to_dto(doc: &Document, label: &str) -> TabDto {
         .collect();
     TabDto {
         label: label.to_string(),
+        uid: uid.to_string(),
         name: net.name.clone(),
         comment: net.comment.clone(),
         nodes,
@@ -139,9 +145,9 @@ pub fn project_from_json(text: &str) -> Result<Project, IoError> {
     for tab in dto.tabs {
         let doc =
             tab_from_dto(tab.name, tab.comment, tab.nodes, tab.visual, tab.notes, tab.precision)?;
-        sheets.push(ProjectSheet { label: tab.label, doc });
+        sheets.push(ProjectSheet { label: tab.label, uid: tab.uid, doc });
     }
-    Ok(Project { sheets, active: dto.active_tab })
+    Ok(Project { uid: dto.uid, sheets, active: dto.active_tab })
 }
 
 fn tab_from_dto(
@@ -184,7 +190,12 @@ fn tab_from_dto(
 // Keep the old public names for backward compat within the crate.
 pub fn to_json(doc: &Document) -> Result<String, IoError> {
     let project = Project {
-        sheets: vec![ProjectSheet { label: doc.network.name.clone(), doc: doc.clone() }],
+        uid: String::new(),
+        sheets: vec![ProjectSheet {
+            label: doc.network.name.clone(),
+            uid: String::new(),
+            doc: doc.clone(),
+        }],
         active: 0,
     };
     project_to_json(&project)

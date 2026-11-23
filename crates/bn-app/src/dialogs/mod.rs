@@ -9,6 +9,7 @@ pub mod ai_evidence;
 pub mod ai_settings;
 pub mod arc_strength;
 pub mod cpt_editor;
+pub mod data_section_pick;
 pub mod host;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod laya_download;

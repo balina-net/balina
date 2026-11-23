@@ -22,6 +22,16 @@ thread_local! {
     /// Handle to the Open Recent submenu so the list can be rebuilt live.
     static RECENT_SUBMENU: std::cell::RefCell<Option<Submenu>> =
         const { std::cell::RefCell::new(None) };
+    /// Data items whose enabled/checked state follows the session.
+    static DATA_ITEMS: std::cell::RefCell<Option<DataItems>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct DataItems {
+    remove: MenuItem,
+    save_as: MenuItem,
+    panel: CheckMenuItem,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -51,6 +61,11 @@ pub fn build() -> Menu {
         menu.append(&app_menu).unwrap();
     }
 
+    let save_data_as = MenuItem::with_id("file.saveDataAs", "Save Data As…", false, None);
+    let remove_data = MenuItem::with_id("cases.removeData", "Remove Data", false, None);
+    let data_panel =
+        CheckMenuItem::with_id("cases.showDataPanel", "Show Data Panel", true, false, None);
+
     let recent = Submenu::new("Open Recent", true);
     RECENT_SUBMENU.with(|c| *c.borrow_mut() = Some(recent.clone()));
     rebuild_recent_items(&crate::chrome::recent::load());
@@ -62,7 +77,8 @@ pub fn build() -> Menu {
         &recent,
         &PredefinedMenuItem::separator(),
         &item_accel("file.save", "Save", "CmdOrCtrl+S"),
-        &item_accel("file.saveAs", "Save As… (balina / xmlbif / xdsl)", "CmdOrCtrl+Shift+S"),
+        &item_accel("file.saveAs", "Save As… (balina / balpck / xmlbif / xdsl)", "CmdOrCtrl+Shift+S"),
+        &save_data_as,
         &PredefinedMenuItem::separator(),
         &item("file.exportSvg", "Export as SVG…"),
         &item("file.exportPng", "Export as PNG…"),
@@ -118,8 +134,16 @@ pub fn build() -> Menu {
             &item("cases.learnCpts", "Learn CPTs from Cases…"),
             &item("cases.learnStructure", "Learn Structure from Cases…"),
             &item("cases.simulate", "Simulate Cases…"),
+            &PredefinedMenuItem::separator(),
+            &item("cases.attachData", "Attach Data…"),
+            &remove_data,
+            &data_panel,
         ])
         .unwrap();
+    DATA_ITEMS.with(|c| {
+        *c.borrow_mut() =
+            Some(DataItems { remove: remove_data, save_as: save_data_as, panel: data_panel })
+    });
 
     let tools = Submenu::new("&Tools", true);
     tools
@@ -199,6 +223,22 @@ pub fn sync_auto_update_item(on: bool) {
 #[cfg(target_arch = "wasm32")]
 pub fn sync_auto_update_item(_on: bool) {}
 
+/// Sync the data items: Remove needs data on the active tab, Save Data As
+/// on any tab; the panel item mirrors the panel.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn sync_data_items(tab_has_data: bool, any_data: bool, panel_open: bool) {
+    DATA_ITEMS.with(|c| {
+        if let Some(items) = c.borrow().as_ref() {
+            items.remove.set_enabled(tab_has_data);
+            items.save_as.set_enabled(any_data);
+            items.panel.set_checked(panel_open);
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn sync_data_items(_tab_has_data: bool, _any_data: bool, _panel_open: bool) {}
+
 /// Route a menu event by id. Runs on the UI thread; long flows spawn.
 pub fn route(id: &str) {
     match id {
@@ -208,6 +248,8 @@ pub fn route(id: &str) {
         "file.saveAs" => crate::chrome::file_ops::file_save(true),
         "file.exportSvg" => crate::export::export_svg(),
         "file.exportPng" => crate::export::export_png(),
+        #[cfg(not(target_arch = "wasm32"))]
+        "file.saveDataAs" => crate::data::save_data_as_flow(),
         #[cfg(not(target_arch = "wasm32"))]
         "file.recent.clear" => crate::chrome::recent::clear(),
         #[cfg(not(target_arch = "wasm32"))]
@@ -258,6 +300,9 @@ pub fn route(id: &str) {
         "cases.learnCpts" => open_dialog(DialogDesc::LearnCpts),
         "cases.learnStructure" => open_dialog(DialogDesc::StructureLearn),
         "cases.simulate" => open_dialog(DialogDesc::Simulate),
+        "cases.attachData" => crate::data::attach_data_flow(),
+        "cases.removeData" => crate::data::remove_data_flow(),
+        "cases.showDataPanel" => crate::data::toggle_panel(),
         "tools.sensitivity" => open_dialog(DialogDesc::Sensitivity),
         "tools.arcStrength" => open_dialog(DialogDesc::ArcStrength),
         "tools.solveId" => {

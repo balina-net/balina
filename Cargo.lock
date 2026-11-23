@@ -638,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "bn-app"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "ai",
  "base64 0.22.1",
@@ -667,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "bn-core"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "csv",
  "quick-xml",
@@ -676,11 +676,12 @@ dependencies = [
  "serde_json",
  "slotmap",
  "thiserror 2.0.20",
+ "zip",
 ]
 
 [[package]]
 name = "bn-session"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bn-core",
  "csv",
@@ -695,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "bn-worker"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bn-core",
  "bn-session",
@@ -8729,6 +8730,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc12baa6db2b15a140161ce53d72209dacea594230798c24774139b54ecaa980"
 dependencies = [
  "crc32fast",
+ "flate2",
  "indexmap",
  "memchr",
  "typed-path",

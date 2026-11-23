@@ -10,7 +10,6 @@
 //!    one `begin_change`, clone-swap the net (NodeIds survive, so visuals
 //!    and evidence stay attached).
 
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -587,16 +586,4 @@ pub fn simulate_cases_csv(net: &Network, n: usize, missing_pct: f64) -> Result<S
     let mut buf: Vec<u8> = Vec::new();
     learn::write_cases(net, &cases, &mut buf).map_err(|e| CmdError::Io(e.to_string()))?;
     String::from_utf8(buf).map_err(|e| CmdError::Io(e.to_string()))
-}
-
-/// Desktop wrapper: simulate and write straight to `path`.
-pub fn simulate_cases_to_file(
-    net: &Network,
-    path: PathBuf,
-    n: usize,
-    missing_pct: f64,
-) -> Result<String, CmdError> {
-    let csv = simulate_cases_csv(net, n, missing_pct)?;
-    std::fs::write(&path, csv)?;
-    Ok(format!("Wrote {} cases to {}", n, path.display()))
 }

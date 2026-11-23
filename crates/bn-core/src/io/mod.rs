@@ -1,8 +1,12 @@
 //! File formats. Each format has its own DTO layer; the shared unit of
 //! exchange is [`Document`]: a network plus visual (layout) metadata.
-//! A [`Project`] wraps multiple documents as tabs.
+//! A [`Project`] wraps multiple documents as tabs. Case data travels
+//! separately: [`baltsv`] is the per-tab data sidecar and [`pack`] zips a
+//! project together with it.
 
+pub mod baltsv;
 pub mod native;
+pub mod pack;
 pub mod xdsl;
 pub mod xmlbif;
 
@@ -96,12 +100,18 @@ pub struct Document {
 #[derive(Clone, Debug)]
 pub struct ProjectSheet {
     pub label: String,
+    /// Persistent tab identity (keys the tab's `.baltsv` section). Empty in
+    /// files saved before uids existed; the session fills it in.
+    pub uid: String,
     pub doc: Document,
 }
 
 /// A multi-tab project.
 #[derive(Clone, Debug)]
 pub struct Project {
+    /// Persistent project identity (ties a `.baltsv` sidecar to its
+    /// project). Empty in files saved before uids existed.
+    pub uid: String,
     pub sheets: Vec<ProjectSheet>,
     pub active: usize,
 }
@@ -111,6 +121,9 @@ pub enum Format {
     NativeJson,
     Xmlbif,
     Xdsl,
+    /// `.balpck`: a zip of the native project plus its data sidecar. Binary,
+    /// so the text-based `load_str`/`save_str` reject it; see [`pack`].
+    Pack,
 }
 
 impl Format {
@@ -124,6 +137,7 @@ impl Format {
             "balina" | "json" => Ok(Format::NativeJson),
             "xml" | "bif" | "xmlbif" => Ok(Format::Xmlbif),
             "xdsl" => Ok(Format::Xdsl),
+            "balpck" => Ok(Format::Pack),
             other => Err(IoError::UnknownFormat(other.to_string())),
         }
     }
@@ -155,6 +169,7 @@ pub fn load_str(text: &str, fmt: Format) -> Result<Document, IoError> {
         }
         Format::Xmlbif => xmlbif::from_xml(text),
         Format::Xdsl => xdsl::from_xml(text),
+        Format::Pack => Err(pack::not_text()),
     }
 }
 
@@ -169,13 +184,19 @@ pub fn save_str(doc: &Document, fmt: Format) -> Result<(String, Vec<Warning>), I
     match fmt {
         Format::NativeJson => {
             let project = Project {
-                sheets: vec![ProjectSheet { label: doc.network.name.clone(), doc: doc.clone() }],
+                uid: String::new(),
+                sheets: vec![ProjectSheet {
+                    label: doc.network.name.clone(),
+                    uid: String::new(),
+                    doc: doc.clone(),
+                }],
                 active: 0,
             };
             Ok((native::project_to_json(&project)?, vec![]))
         }
         Format::Xmlbif => xmlbif::to_xml(doc),
         Format::Xdsl => xdsl::to_xml(doc),
+        Format::Pack => Err(pack::not_text()),
     }
 }
 

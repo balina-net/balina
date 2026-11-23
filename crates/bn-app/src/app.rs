@@ -9,7 +9,7 @@ use crate::canvas::node::kind_header_color;
 use crate::canvas::note_style::note_fill;
 use crate::chrome::toolbar::{add_at_center, palette_footprint, Toolbar};
 use crate::chrome::{message_log::MessageLog, status_bar::StatusBar};
-use crate::state::{exec, SESSION};
+use crate::state::{exec, DATA_BANNER, SESSION, SHOW_DATA_PANEL};
 
 /// Finish a palette drag at `c` (client coords): a barely-moved click adds
 /// at view center; a drop inside the canvas adds at the cursor; anything
@@ -70,6 +70,15 @@ pub fn App() -> Element {
         crate::chrome::menu::route(ev.id().as_ref());
     });
 
+    // Data menu items follow the active tab's data and the panel.
+    use_effect(move || {
+        let (tab_has_data, any_data) = {
+            let s = SESSION.read();
+            (s.active_tab().data.is_some(), bn_session::ops::data::any_data(&s))
+        };
+        crate::chrome::menu::sync_data_items(tab_has_data, any_data, *SHOW_DATA_PANEL.read());
+    });
+
     // Window title tracks name + modified star.
     use_effect(move || {
         let s = SESSION.read();
@@ -89,6 +98,7 @@ pub fn App() -> Element {
         _ => None,
     };
     let conflict = SESSION.read().bridge().conflict;
+    let data_banner = DATA_BANNER.read().clone();
 
     rsx! {
         Stylesheet {}
@@ -144,8 +154,32 @@ pub fn App() -> Element {
                     }
                 }
             }
-            div { class: "min-h-0 flex-1",
-                crate::canvas::canvas::NetworkCanvas {}
+            if let Some(msg) = data_banner {
+                div {
+                    class: "flex shrink-0 items-center gap-3 border-b border-sky-200 \
+                            bg-sky-50 px-3 py-1.5 text-xs text-sky-900",
+                    span { class: "font-medium", "{msg}" }
+                    button {
+                        class: "rounded border border-sky-300 bg-white px-2 py-0.5 hover:bg-sky-100",
+                        onclick: move |_| {
+                            *SHOW_DATA_PANEL.write() = true;
+                            *DATA_BANNER.write() = None;
+                        },
+                        "View data"
+                    }
+                    button {
+                        class: "ml-auto rounded px-1 opacity-70 hover:opacity-100",
+                        title: "Dismiss",
+                        onclick: move |_| *DATA_BANNER.write() = None,
+                        "✕"
+                    }
+                }
+            }
+            div { class: "flex min-h-0 flex-1",
+                div { class: "min-w-0 flex-1",
+                    crate::canvas::canvas::NetworkCanvas {}
+                }
+                crate::data::panel::DataPanel {}
             }
             StatusBar {}
             MessageLog {}

@@ -739,3 +739,226 @@ fn ai_evidence_mixed_hard_and_likelihood_batch() {
     assert!(err.is_err());
     assert!(s.doc().evidence.get(dyspnea).is_none());
 }
+
+// ---------------------------------------------------------------------------
+// Case data: attach, sidecar, pack
+// ---------------------------------------------------------------------------
+
+/// A fresh directory under the system temp dir (no tempfile dependency).
+fn scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("balina-{name}-{}", crate::session::new_uid()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// Open asia, simulate cases and attach them to the active tab.
+fn asia_with_data(cache: &Path, n: usize) -> Session {
+    let mut s = Session::new();
+    ops::file::doc_open(&mut s, examples_dir().join("asia.balina")).unwrap();
+    let csv = ops::learn::simulate_cases_csv(&s.doc().net, n, 10.0).unwrap();
+    let prepared = ops::data::prepare(
+        csv.as_bytes(),
+        None,
+        ops::data::DataTarget::Dir(cache),
+        ops::data::ORIGIN_SIMULATE,
+        "",
+        &mut |_| {},
+    )
+    .unwrap();
+    assert_eq!(prepared.rows(), n as u64);
+    let tab = s.active_id();
+    assert!(ops::data::attach(&mut s, tab, prepared));
+    s
+}
+
+fn snapshot_count(cache: &Path) -> usize {
+    std::fs::read_dir(cache).map(|d| d.count()).unwrap_or(0)
+}
+
+#[test]
+fn legacy_project_gets_uids_silently() {
+    let mut s = Session::new();
+    ops::file::doc_open(&mut s, examples_dir().join("asia.balina")).unwrap();
+    assert_eq!(s.uid.len(), 16);
+    assert_eq!(s.active_tab().uid.len(), 16);
+    assert!(!s.modified);
+}
+
+#[test]
+fn attached_data_reads_shares_and_cleans_up() {
+    let cache = scratch("cache");
+    let mut s = asia_with_data(&cache, 600);
+    assert!(s.modified);
+    assert_eq!(snapshot_count(&cache), 1);
+    let data = s.active_tab().data.clone().unwrap();
+    assert_eq!(data.cols, 8);
+    let rows = ops::data::read_rows(&data, 590, 50).unwrap();
+    assert_eq!(rows.len(), 10);
+    assert_eq!(rows[0].len(), 8);
+
+    // Learning from the tab's data sees the same cases.
+    let bytes = ops::data::case_bytes(&data).unwrap();
+    let cases = bn_core::learn::read_cases_with(
+        &s.doc().net,
+        bytes.as_slice(),
+        Some(ops::data::CASE_BYTES_DELIM),
+    )
+    .unwrap();
+    assert_eq!(cases.n_cases(), 600);
+
+    // Duplicates share the body; the snapshot goes with the last holder.
+    let src = s.active_id();
+    let copy = ops::tab::duplicate_tab(&mut s, src).unwrap();
+    assert_ne!(s.tab(copy).uid, s.tab(src).uid);
+    assert!(s.tab(copy).data.as_ref().unwrap().same_body(&data));
+    drop(data);
+    ops::data::remove(&mut s, src);
+    assert_eq!(snapshot_count(&cache), 1);
+    ops::tab::close_tab(&mut s, copy).unwrap();
+    assert_eq!(snapshot_count(&cache), 0);
+}
+
+#[test]
+fn balina_save_writes_discovers_and_removes_sidecar() {
+    let (cache, dir) = (scratch("cache"), scratch("proj"));
+    let mut s = asia_with_data(&cache, 300);
+    let project = dir.join("asia.balina");
+    let sidecar = dir.join("asia.baltsv");
+    let res = ops::file::doc_save(&mut s, Some(project.clone())).unwrap();
+    assert!(res.warnings.is_empty(), "{:?}", res.warnings);
+    assert_eq!(res.notes.len(), 1);
+    assert!(sidecar.is_file());
+    // Data now reads from the sidecar; the snapshot is gone.
+    assert_eq!(snapshot_count(&cache), 0);
+    let rows = ops::data::read_rows(s.active_tab().data.as_ref().unwrap(), 0, 5).unwrap();
+    assert_eq!(rows.len(), 5);
+
+    // Unchanged data: the sidecar is left alone.
+    let stamp = std::fs::metadata(&sidecar).unwrap().modified().unwrap();
+    let res = ops::file::doc_save(&mut s, None).unwrap();
+    assert!(res.notes.is_empty());
+    assert_eq!(std::fs::metadata(&sidecar).unwrap().modified().unwrap(), stamp);
+
+    // Reopening finds it.
+    let mut t = Session::new();
+    ops::file::doc_open(&mut t, project.clone()).unwrap();
+    assert_eq!(t.uid, s.uid);
+    let rep = ops::data::discover_sidecar(&mut t, &project).unwrap().unwrap();
+    assert_eq!(rep.attached, 1);
+    assert!(rep.warnings("asia.baltsv").is_empty());
+    assert!(!t.modified);
+    let data = t.active_tab().data.clone().unwrap();
+    assert!(data.index.is_none(), "discovered data is indexed lazily");
+    let stats = ops::data::index(&data).unwrap();
+    ops::data::set_index(&mut t, &data, stats);
+    let data = t.active_tab().data.clone().unwrap();
+    assert_eq!(data.rows, 300);
+    assert_eq!(ops::data::read_rows(&data, 299, 5).unwrap().len(), 1);
+
+    // Another project's sidecar is never attached.
+    let mut other = Session::new();
+    ops::file::doc_open(&mut other, examples_dir().join("asia.balina")).unwrap();
+    let rep = ops::data::discover_sidecar(&mut other, &project).unwrap().unwrap();
+    assert!(rep.foreign && rep.attached == 0);
+
+    // Removing the last data deletes this project's sidecar on save.
+    let tab = t.active_id();
+    ops::data::remove(&mut t, tab);
+    let res = ops::file::doc_save(&mut t, None).unwrap();
+    assert_eq!(res.notes.len(), 1);
+    assert!(!sidecar.exists());
+}
+
+#[test]
+fn pack_roundtrips_data_on_desktop_and_web() {
+    let (cache, dir) = (scratch("cache"), scratch("pack"));
+    let mut s = asia_with_data(&cache, 200);
+    let pack = dir.join("asia.balpck");
+    ops::file::doc_save(&mut s, Some(pack.clone())).unwrap();
+    assert!(!dir.join("asia.baltsv").exists());
+
+    let mut t = Session::new();
+    ops::file::doc_open(&mut t, pack.clone()).unwrap();
+    let loaded = ops::data::extract_pack_file(&pack, &cache).unwrap().unwrap();
+    let rep = ops::data::attach_pack_data(&mut t, &pack, &loaded);
+    assert_eq!(rep.attached, 1);
+    drop(loaded);
+    let data = t.active_tab().data.clone().unwrap();
+    let stats = ops::data::index(&data).unwrap();
+    assert_eq!(stats.index.rows, 200);
+
+    // Re-saving unchanged data copies it raw; the result still opens.
+    ops::file::doc_save(&mut t, None).unwrap();
+    let bytes = std::fs::read(&pack).unwrap();
+    let mut w = Session::new();
+    let rep = ops::file::doc_open_pack_bytes(&mut w, &bytes).unwrap();
+    assert_eq!(rep.attached, 1);
+    assert_eq!(w.uid, s.uid);
+
+    // Web save → web open.
+    let bytes = ops::file::doc_save_pack_bytes(&mut w).unwrap();
+    let mut v = Session::new();
+    ops::file::doc_open_pack_bytes(&mut v, &bytes).unwrap();
+    let data = v.active_tab().data.clone().unwrap();
+    let stats = ops::data::index(&data).unwrap();
+    ops::data::set_index(&mut v, &data, stats);
+    let rows = ops::data::read_rows(v.active_tab().data.as_ref().unwrap(), 0, 500).unwrap();
+    assert_eq!(rows.len(), 200);
+}
+
+#[test]
+fn non_native_saves_warn_about_data() {
+    let cache = scratch("cache");
+    let mut s = asia_with_data(&cache, 10);
+    let (_, warnings) = ops::file::doc_save_str(&mut s, bn_core::io::Format::Xdsl).unwrap();
+    assert!(warnings.iter().any(|w| w.contains(".xdsl")));
+    let (_, warnings) = ops::file::doc_save_str(&mut s, bn_core::io::Format::NativeJson).unwrap();
+    assert!(warnings.iter().any(|w| w.contains(".balpck")));
+}
+
+#[test]
+fn failed_sidecar_write_keeps_project_modified() {
+    let (cache, dir) = (scratch("cache"), scratch("proj"));
+    let mut s = asia_with_data(&cache, 20);
+    // A directory where the temp sidecar would go makes the write fail.
+    std::fs::create_dir_all(dir.join("asia.baltsv.tmp")).unwrap();
+    let res = ops::file::doc_save(&mut s, Some(dir.join("asia.balina"))).unwrap();
+    assert!(dir.join("asia.balina").is_file(), "the project itself is saved");
+    assert!(res.warnings.iter().any(|w| w.contains("case data was not saved")));
+    assert!(s.modified, "quitting must still ask");
+    assert!(ops::data::read_rows(s.active_tab().data.as_ref().unwrap(), 0, 5).is_ok());
+}
+
+#[test]
+fn save_data_as_over_the_file_in_use_keeps_data_readable() {
+    let (cache, dir) = (scratch("cache"), scratch("proj"));
+    let mut s = asia_with_data(&cache, 50);
+    let project = dir.join("asia.balina");
+    ops::file::doc_save(&mut s, Some(project.clone())).unwrap();
+    // Tabs now read the sidecar in place; overwrite exactly that file.
+    let sidecar = dir.join("asia.baltsv");
+    assert_eq!(ops::data::save_data_as(&mut s, &sidecar).unwrap(), 1);
+    assert!(!ops::data::has_stale(&s));
+    let rows = ops::data::read_rows(s.active_tab().data.as_ref().unwrap(), 45, 10).unwrap();
+    assert_eq!(rows.len(), 5);
+    // Still the current sidecar: the next save leaves it alone.
+    assert!(ops::file::doc_save(&mut s, None).unwrap().notes.is_empty());
+}
+
+#[test]
+fn pack_with_unreadable_data_opens_with_a_warning() {
+    use bn_core::io::pack::PackWriter;
+    use std::io::Write;
+    let mut s = Session::new();
+    ops::file::doc_open(&mut s, examples_dir().join("asia.balina")).unwrap();
+    let json = bn_core::io::save_project_str(&bn_core::io::load_project(&examples_dir().join("asia.balina")).unwrap()).unwrap();
+    let mut w = PackWriter::new(std::io::Cursor::new(Vec::new()), &json).unwrap();
+    w.data_writer(9).unwrap().write_all(b"not data\n").unwrap();
+    let bytes = w.finish().unwrap().into_inner();
+
+    let mut t = Session::new();
+    let rep = ops::file::doc_open_pack_bytes(&mut t, &bytes).unwrap();
+    assert_eq!(t.doc().net.len(), 8, "the project still opened");
+    assert!(rep.data_error.is_some());
+    assert!(rep.warnings("x.balpck").iter().any(|w| w.contains("could not be read")));
+}

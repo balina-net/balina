@@ -460,6 +460,27 @@ fn native_json_without_precision_field_defaults_to_2() {
 }
 
 #[test]
+fn native_json_project_and_tab_uids_roundtrip() {
+    let doc = Document { network: asia(), visual: Default::default() };
+    let project = io::Project {
+        uid: "00000000000000aa".into(),
+        sheets: vec![io::ProjectSheet { label: "Asia".into(), uid: "00000000000000bb".into(), doc }],
+        active: 0,
+    };
+    let text = io::save_project_str(&project).unwrap();
+    let back = io::load_project_str(&text).unwrap();
+    assert_eq!(back.uid, "00000000000000aa");
+    assert_eq!(back.sheets[0].uid, "00000000000000bb");
+    assert_eq!(io::save_project_str(&back).unwrap(), text);
+    // Files saved before uids existed load with empty ones (the session
+    // fills them in) and stay uid-free when nobody assigns any.
+    let legacy = io::save_str(&back.sheets[0].doc, Format::NativeJson).unwrap().0;
+    assert!(!legacy.contains("\"uid\""));
+    let old = io::load_project_str(&legacy).unwrap();
+    assert!(old.uid.is_empty() && old.sheets[0].uid.is_empty());
+}
+
+#[test]
 fn native_json_precision_roundtrips() {
     // Per-node precision and the legacy tab-level seed both survive.
     let mut doc = Document { network: asia(), visual: Default::default() };

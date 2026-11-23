@@ -50,6 +50,8 @@ pub enum IoError {
     Malformed(String),
     #[error("model error: {0}")]
     Model(#[from] ModelError),
+    #[error("zip error: {0}")]
+    Zip(#[from] zip::result::ZipError),
 }
 
 #[derive(Debug, Error)]
@@ -62,6 +64,8 @@ pub enum CaseError {
     UnknownState { node: String, value: String },
     #[error("no columns match any node in the network")]
     NoMatchingColumns,
+    #[error("the case file has no header row")]
+    NoHeader,
     #[error("column `{column}` has more than {max} distinct values; not usable as a discrete node")]
     TooManyStates { column: String, max: usize },
     #[error("model error: {0}")]
