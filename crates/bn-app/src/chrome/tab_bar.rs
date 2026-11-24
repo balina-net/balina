@@ -63,11 +63,17 @@ pub fn switch_to_tab(id: TabId) {
 }
 
 pub fn add_new_tab() {
+    if crate::ui_config::read_only() {
+        return;
+    }
     exec(|s| { bn_session::ops::tab::add_tab(s); Ok(()) });
     *crate::canvas::controller::FIT_REQUEST.write() += 1;
 }
 
 pub fn close_tab(id: TabId) {
+    if crate::ui_config::read_only() {
+        return;
+    }
     // Closing: if this was the active tab, tab_bar will re-render and we
     // need to load the new active tab's viewport.
     let was_active = SESSION.read().active_id() == id;
@@ -88,6 +94,9 @@ pub fn close_tab(id: TabId) {
 }
 
 pub fn duplicate_tab(id: TabId) {
+    if crate::ui_config::read_only() {
+        return;
+    }
     exec(|s| bn_session::ops::tab::duplicate_tab(s, id));
     *crate::canvas::controller::FIT_REQUEST.write() += 1;
 }
@@ -113,6 +122,9 @@ pub fn TabBar() -> Element {
     let mut drag_over: Signal<Option<usize>> = use_signal(|| None);
     // Tab context menu: (tab id, client x, client y).
     let mut tab_menu: Signal<Option<(TabId, f64, f64)>> = use_signal(|| None);
+    // Read-only: tabs can still be switched, but not created, closed,
+    // renamed, duplicated or reordered.
+    let ro = crate::ui_config::read_only();
 
     rsx! {
         div {
@@ -159,7 +171,7 @@ pub fn TabBar() -> Element {
                             }
                         }
                         div {
-                            draggable: "true",
+                            draggable: if ro { "false" } else { "true" },
                             class: if is_dragging_this {
                                 if is_active {
                                     "group flex items-center gap-1 rounded-t border border-b-0 bg-background px-3 py-1 text-xs font-medium cursor-default opacity-50"
@@ -183,11 +195,20 @@ pub fn TabBar() -> Element {
                             },
                             oncontextmenu: move |ev| {
                                 ev.prevent_default();
+                                // Every item in this menu mutates the session.
+                                if ro {
+                                    return;
+                                }
                                 let c = ev.data().client_coordinates();
                                 tab_menu.set(Some((id, c.x, c.y)));
                             },
                             ondragstart: move |ev| {
                                 ev.stop_propagation();
+                                // Leaving `dragging` as None also makes every
+                                // `ondrop` reorder handler a no-op.
+                                if ro {
+                                    return;
+                                }
                                 dragging.set(Some(id));
                                 drag_over.set(None);
                             },
@@ -219,13 +240,15 @@ pub fn TabBar() -> Element {
                             if modified {
                                 span { class: "text-muted-foreground", " *" }
                             }
-                            button {
-                                class: "ml-1 inline-flex rounded p-0.5 text-muted-foreground hover:bg-red-100 hover:text-red-600",
-                                onclick: move |ev| {
-                                    ev.stop_propagation();
-                                    close_tab(id);
-                                },
-                                "×"
+                            if !ro {
+                                button {
+                                    class: "ml-1 inline-flex rounded p-0.5 text-muted-foreground hover:bg-red-100 hover:text-red-600",
+                                    onclick: move |ev| {
+                                        ev.stop_propagation();
+                                        close_tab(id);
+                                    },
+                                    "×"
+                                }
                             }
                         }
                     }
@@ -267,11 +290,13 @@ pub fn TabBar() -> Element {
                     }
                 }
             }
-            button {
-                class: "flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent mb-0.5",
-                onclick: move |_| add_new_tab(),
-                title: "New tab",
-                "+"
+            if !ro {
+                button {
+                    class: "flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent mb-0.5",
+                    onclick: move |_| add_new_tab(),
+                    title: "New tab",
+                    "+"
+                }
             }
         }
         // Tab context menu popup.

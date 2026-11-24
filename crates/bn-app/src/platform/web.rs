@@ -79,12 +79,23 @@ pub async fn sleep_ms(ms: u64) {
     gloo_timers::future::TimeoutFuture::new(ms as u32).await;
 }
 
-/// The `file` query parameter of the page URL, if present and non-empty:
-/// `…/?file={url}` asks the app to open that network on startup.
-pub fn initial_file_url() -> Option<String> {
+/// A query parameter of the page URL, if present and non-blank. `get`
+/// percent-decodes, so both the raw and the encoded form of a value work.
+fn query_param(name: &str) -> Option<String> {
     let search = web_sys::window()?.location().search().ok()?;
     let params = web_sys::UrlSearchParams::new_with_str(&search).ok()?;
-    params.get("file").filter(|u| !u.trim().is_empty())
+    params.get(name).filter(|v| !v.trim().is_empty())
+}
+
+/// `…/?file={url}` asks the app to open that network on startup.
+pub fn initial_file_url() -> Option<String> {
+    query_param("file")
+}
+
+/// `…/?ui={json}` configures chrome visibility and the read-only gate; see
+/// `crate::ui_config`.
+pub fn ui_config_param() -> Option<String> {
+    query_param("ui")
 }
 
 fn js_err(v: wasm_bindgen::JsValue) -> String {

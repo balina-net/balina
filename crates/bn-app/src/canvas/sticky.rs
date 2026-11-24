@@ -44,7 +44,10 @@ pub fn StickyNote(id: NoteId, rect: Rect) -> Element {
         "flex h-[14px] shrink-0 items-center rounded-t-sm px-0.5"
     };
     let toggle_title = if collapsed { "Expand" } else { "Collapse" };
-    let cursor = if editing { "default" } else { "grab" };
+    // Read-only notes cannot be dragged, resized, edited or deleted, so no
+    // grab cursor and no hover controls.
+    let ro = crate::ui_config::read_only();
+    let cursor = if editing || ro { "default" } else { "grab" };
     // pointer-events gating: while invisible (not hovered) the buttons must
     // not steal mousedowns from the drag bar.
     const BAR_BTN: &str = "pointer-events-none flex size-3 shrink-0 cursor-default items-center \
@@ -67,8 +70,11 @@ pub fn StickyNote(id: NoteId, rect: Rect) -> Element {
         }
         let c = ev.data().client_coordinates();
         let (starts, note_starts) = controller::drag_starts(None, Some(id));
-        *GESTURE.write() =
-            Gesture::PendingNodeDrag { start_client: (c.x, c.y), starts, note_starts };
+        controller::arm(Gesture::PendingNodeDrag {
+            start_client: (c.x, c.y),
+            starts,
+            note_starts,
+        });
     };
 
     // True when the mousedown that armed the current gesture hit an
@@ -104,11 +110,11 @@ pub fn StickyNote(id: NoteId, rect: Rect) -> Element {
                     drop(sel);
                     let c = ev.data().client_coordinates();
                     let (starts, note_starts) = controller::drag_starts(None, Some(id));
-                    *GESTURE.write() = Gesture::PendingNodeDrag {
+                    controller::arm(Gesture::PendingNodeDrag {
                         start_client: (c.x, c.y),
                         starts,
                         note_starts,
-                    };
+                    });
                 } else {
                     was_selected.set(SELECTION.read().notes.contains(&id));
                     arm_drag(&ev);
@@ -120,13 +126,17 @@ pub fn StickyNote(id: NoteId, rect: Rect) -> Element {
                 if collapsed {
                     exec(|s| bn_session::ops::edit::set_note_collapsed(s, id, false));
                 } else {
-                    *EDITING_NOTE.write() = Some(id);
+                    crate::state::begin_note_edit(id);
                 }
             },
 
             oncontextmenu: move |ev| {
                 ev.prevent_default();
                 ev.stop_propagation();
+                // Every note-menu item edits the note.
+                if crate::ui_config::read_only() {
+                    return;
+                }
                 let c = ev.data().client_coordinates();
                 *CONTEXT_MENU.write() = Some(ContextMenuState {
                     target: ContextMenuTarget::Note(id),
@@ -138,7 +148,7 @@ pub fn StickyNote(id: NoteId, rect: Rect) -> Element {
             //    Stickies: hover-revealed, double-click toggles collapse) ──
             div {
                 class: bar_class,
-                style: "background: {bar}; cursor: grab;",
+                style: "background: {bar}; cursor: {cursor};",
                 // The bar drags the note even while editing (the wrapper
                 // ignores mousedown then); the textarea blur commits first.
                 onmousedown: move |ev| {
@@ -152,18 +162,23 @@ pub fn StickyNote(id: NoteId, rect: Rect) -> Element {
                 },
                 ondoubleclick: move |ev| {
                     ev.stop_propagation();
+                    if crate::ui_config::read_only() {
+                        return;
+                    }
                     exec(|s| bn_session::ops::edit::set_note_collapsed(s, id, !collapsed));
                 },
-                button {
-                    class: BAR_BTN,
-                    title: "Delete note",
-                    onmousedown: move |ev| ev.stop_propagation(),
-                    ondoubleclick: move |ev| ev.stop_propagation(),
-                    onclick: move |ev| {
-                        ev.stop_propagation();
-                        exec(|s| bn_session::ops::edit::delete_items(s, &[], &[], &[id]));
-                    },
-                    X { class: Some(BAR_ICON.to_string()) }
+                if !ro {
+                    button {
+                        class: BAR_BTN,
+                        title: "Delete note",
+                        onmousedown: move |ev| ev.stop_propagation(),
+                        ondoubleclick: move |ev| ev.stop_propagation(),
+                        onclick: move |ev| {
+                            ev.stop_propagation();
+                            exec(|s| bn_session::ops::edit::delete_items(s, &[], &[], &[id]));
+                        },
+                        X { class: Some(BAR_ICON.to_string()) }
+                    }
                 }
                 if collapsed {
                     div {
@@ -173,19 +188,21 @@ pub fn StickyNote(id: NoteId, rect: Rect) -> Element {
                 } else {
                     div { class: "flex-1" }
                 }
-                button {
-                    class: BAR_BTN,
-                    title: toggle_title,
-                    onmousedown: move |ev| ev.stop_propagation(),
-                    ondoubleclick: move |ev| ev.stop_propagation(),
-                    onclick: move |ev| {
-                        ev.stop_propagation();
-                        exec(|s| bn_session::ops::edit::set_note_collapsed(s, id, !collapsed));
-                    },
-                    if collapsed {
-                        SquareArrowDown { class: Some(BAR_ICON.to_string()) }
-                    } else {
-                        SquareArrowDownLeft { class: Some(BAR_ICON.to_string()) }
+                if !ro {
+                    button {
+                        class: BAR_BTN,
+                        title: toggle_title,
+                        onmousedown: move |ev| ev.stop_propagation(),
+                        ondoubleclick: move |ev| ev.stop_propagation(),
+                        onclick: move |ev| {
+                            ev.stop_propagation();
+                            exec(|s| bn_session::ops::edit::set_note_collapsed(s, id, !collapsed));
+                        },
+                        if collapsed {
+                            SquareArrowDown { class: Some(BAR_ICON.to_string()) }
+                        } else {
+                            SquareArrowDownLeft { class: Some(BAR_ICON.to_string()) }
+                        }
                     }
                 }
             }
@@ -210,7 +227,7 @@ pub fn StickyNote(id: NoteId, rect: Rect) -> Element {
                             let pending =
                                 matches!(*GESTURE.read(), Gesture::PendingNodeDrag { .. });
                             if pending && !*DRAG_HAPPENED.read() && *was_selected.read() {
-                                *EDITING_NOTE.write() = Some(id);
+                                crate::state::begin_note_edit(id);
                             }
                             // No stop_propagation: the canvas still resets
                             // the gesture on this mouseup.
@@ -220,22 +237,24 @@ pub fn StickyNote(id: NoteId, rect: Rect) -> Element {
                 }
 
                 // ── bottom-right resize handle ───────────────────────────
-                div {
-                    class: "absolute right-0 bottom-0 size-3 opacity-0 group-hover:opacity-100",
-                    style: "cursor: nwse-resize; border-bottom-right-radius: 2px; \
-                            background: linear-gradient(135deg, transparent 50%, rgba(0,0,0,0.25) 50%);",
-                    onmousedown: move |ev| {
-                        if ev.data().trigger_button() != Some(MouseButton::Primary) {
-                            return;
-                        }
-                        ev.stop_propagation();
-                        let c = ev.data().client_coordinates();
-                        *GESTURE.write() = Gesture::ResizeNote {
-                            id,
-                            start_client: (c.x, c.y),
-                            start_size: (rect.w, rect.h),
-                        };
-                    },
+                if !ro {
+                    div {
+                        class: "absolute right-0 bottom-0 size-3 opacity-0 group-hover:opacity-100",
+                        style: "cursor: nwse-resize; border-bottom-right-radius: 2px; \
+                                background: linear-gradient(135deg, transparent 50%, rgba(0,0,0,0.25) 50%);",
+                        onmousedown: move |ev| {
+                            if ev.data().trigger_button() != Some(MouseButton::Primary) {
+                                return;
+                            }
+                            ev.stop_propagation();
+                            let c = ev.data().client_coordinates();
+                            controller::arm(Gesture::ResizeNote {
+                                id,
+                                start_client: (c.x, c.y),
+                                start_size: (rect.w, rect.h),
+                            });
+                        },
+                    }
                 }
             }
         }

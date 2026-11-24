@@ -17,6 +17,7 @@ mod logic;
 mod platform;
 mod state;
 mod ui;
+mod ui_config;
 
 /// File passed on the command line, opened on first mount (desktop only).
 #[cfg(not(target_arch = "wasm32"))]

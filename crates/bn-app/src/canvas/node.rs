@@ -198,14 +198,17 @@ pub fn BnNode(id: NodeId, rect: Rect) -> Element {
     };
 
     let n_states = d.state_names.len();
-    let show_handles = d.kind != NodeKind::Utility;
+    // Read-only: no link handles, and no cursor promising a drag.
+    let ro = crate::ui_config::read_only();
+    let show_handles = d.kind != NodeKind::Utility && !ro;
+    let cursor = if ro { "default" } else { "grab" };
     let d_rows = d.clone();
 
     rsx! {
         div {
             class: "group absolute rounded-[5px]",
             style: "left: {rect.x:.1}px; top: {rect.y:.1}px; width: {rect.w:.0}px; height: {rect.h:.0}px; \
-                    background: {body}; border: {border_width}px solid {border_color}; cursor: grab;",
+                    background: {body}; border: {border_width}px solid {border_color}; cursor: {cursor};",
 
             onmousedown: move |ev| {
                 if ev.data().trigger_button() != Some(MouseButton::Primary) {
@@ -231,8 +234,11 @@ pub fn BnNode(id: NodeId, rect: Rect) -> Element {
                 }
                 let c = ev.data().client_coordinates();
                 let (starts, note_starts) = controller::drag_starts(Some(id), None);
-                *GESTURE.write() =
-                    Gesture::PendingNodeDrag { start_client: (c.x, c.y), starts, note_starts };
+                controller::arm(Gesture::PendingNodeDrag {
+                    start_client: (c.x, c.y),
+                    starts,
+                    note_starts,
+                });
             },
 
             onmouseup: move |ev| {
@@ -363,8 +369,11 @@ pub fn BnNode(id: NodeId, rect: Rect) -> Element {
                             ev.stop_propagation();
                             let c = ev.data().client_coordinates();
                             let cursor_world = VIEWPORT.read().client_to_world(c.x, c.y);
-                            *GESTURE.write() =
-                                Gesture::Connect { from: id, cursor_world, over: None };
+                            controller::arm(Gesture::Connect {
+                                from: id,
+                                cursor_world,
+                                over: None,
+                            });
                         },
                     }
                 }

@@ -106,6 +106,36 @@ pub enum Gesture {
     },
 }
 
+impl Gesture {
+    /// True if committing this gesture would write the document.
+    ///
+    /// Exhaustive on purpose: a new `Gesture` variant is a COMPILE ERROR here
+    /// until it is classified, so no future gesture can silently escape the
+    /// read-only gate.
+    pub fn mutates(&self) -> bool {
+        match self {
+            Gesture::PendingNodeDrag { .. }
+            | Gesture::DragNodes { .. }
+            | Gesture::ResizeNote { .. }
+            | Gesture::Connect { .. }
+            | Gesture::Reconnect { .. }
+            | Gesture::PaletteDrag { .. } => true,
+            Gesture::Idle | Gesture::Pan { .. } | Gesture::RubberBand { .. } => false,
+        }
+    }
+}
+
+/// Arm `g` — unless the view is read-only and committing `g` would write the
+/// document. Pan and rubber-band selection are unaffected. Callers that also
+/// update SELECTION keep doing so: only the gesture is dropped, so
+/// click-to-select still works while dragging does not.
+pub fn arm(g: Gesture) {
+    if g.mutates() && crate::ui_config::read_only() {
+        return;
+    }
+    *GESTURE.write() = g;
+}
+
 pub fn is_connecting() -> bool {
     matches!(*GESTURE.read(), Gesture::Connect { .. } | Gesture::Reconnect { .. })
 }
@@ -227,5 +257,59 @@ mod tests {
         let vp = Viewport { pan: (0.0, 0.0), zoom: 1.0, size: (800.0, 600.0), origin: (0.0, 0.0) };
         let r = rubber_band_world_rect(&vp, (100.0, 200.0), (50.0, 120.0));
         assert_eq!((r.x, r.y, r.w, r.h), (50.0, 120.0, 50.0, 80.0));
+    }
+
+    /// The read-only gate rests on this classification: `arm` drops exactly
+    /// the gestures that would write the document. Paired with the exhaustive
+    /// `match` in `mutates`, it is the whole gesture guarantee.
+    #[test]
+    fn gesture_mutation_classification() {
+        let pt = Pt { x: 0.0, y: 0.0 };
+        let starts = vec![(nid(1), 0.0, 0.0)];
+        let mutating = [
+            Gesture::PendingNodeDrag {
+                start_client: (0.0, 0.0),
+                starts: starts.clone(),
+                note_starts: vec![],
+            },
+            Gesture::DragNodes {
+                start_client: (0.0, 0.0),
+                starts: starts.clone(),
+                note_starts: vec![],
+            },
+            Gesture::ResizeNote {
+                id: NoteId::from(KeyData::from_ffi((1 << 32) | 7)),
+                start_client: (0.0, 0.0),
+                start_size: (10.0, 10.0),
+            },
+            Gesture::Connect { from: nid(1), cursor_world: pt, over: None },
+            Gesture::Reconnect {
+                parent: nid(1),
+                orig_child: nid(2),
+                cursor_world: pt,
+                over: None,
+            },
+            Gesture::PaletteDrag {
+                item: PaletteItem::Note,
+                start_client: (0.0, 0.0),
+                cur_client: (0.0, 0.0),
+            },
+        ];
+        for g in &mutating {
+            assert!(g.mutates(), "{g:?} must be gated in a read-only view");
+        }
+
+        let view_only = [
+            Gesture::Idle,
+            Gesture::Pan { start_client: (0.0, 0.0), pan_start: (0.0, 0.0) },
+            Gesture::RubberBand {
+                start_client: (0.0, 0.0),
+                cur_client: (1.0, 1.0),
+                additive: false,
+            },
+        ];
+        for g in &view_only {
+            assert!(!g.mutates(), "{g:?} touches no document state");
+        }
     }
 }

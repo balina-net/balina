@@ -239,8 +239,40 @@ pub fn sync_data_items(tab_has_data: bool, any_data: bool, panel_open: bool) {
 #[cfg(target_arch = "wasm32")]
 pub fn sync_data_items(_tab_has_data: bool, _any_data: bool, _panel_open: bool) {}
 
+/// Menu ids that stay available in a read-only view (`?ui={"ro":true}`).
+///
+/// An ALLOWLIST on purpose: a newly added menu item is blocked under `ro`
+/// until it is deliberately listed here. Everything here either never touches
+/// the document (export, analysis, view toggles, navigation) or is an evidence
+/// op, which read-only deliberately keeps live.
+pub fn allowed_in_read_only(id: &str) -> bool {
+    matches!(
+        id,
+        "file.exportSvg"
+            | "file.exportPng"
+            | "edit.undo"
+            | "edit.redo"
+            | "edit.selectAll"
+            | "network.compile"
+            | "network.removeFindings"
+            | "cases.showDataPanel"
+            | "tab.next"
+            | "tab.prev"
+            | "tools.sensitivity"
+            | "tools.arcStrength"
+            | "tools.solveId"
+            | "help.about"
+    )
+}
+
 /// Route a menu event by id. Runs on the UI thread; long flows spawn.
 pub fn route(id: &str) {
+    // The single gate for every menu command: the native muda menu, the web
+    // menu bar, and every hotkey that routes through here. Affordances are
+    // hidden too, so a blocked id normally only arrives by key press.
+    if crate::ui_config::read_only() && !allowed_in_read_only(id) {
+        return;
+    }
     match id {
         "file.new" => crate::chrome::file_ops::file_new(),
         "file.open" => crate::chrome::file_ops::file_open(),
@@ -345,6 +377,63 @@ pub fn route(id: &str) {
         "help.about" => open_dialog(DialogDesc::About),
         _ => {
             state::log_message(format!("Unhandled menu id: {id}"));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::allowed_in_read_only;
+
+    /// The read-only menu gate. This table is where a new menu item is most
+    /// likely to be added, so pin both directions: everything allowed is
+    /// non-mutating (or evidence), and nothing that edits the document,
+    /// the files or the tabs slips through.
+    #[test]
+    fn read_only_menu_allowlist() {
+        for id in [
+            "file.exportSvg",
+            "file.exportPng",
+            "edit.undo",
+            "edit.redo",
+            "edit.selectAll",
+            "network.compile",
+            "network.removeFindings",
+            "cases.showDataPanel",
+            "tab.next",
+            "tab.prev",
+            "tools.sensitivity",
+            "tools.arcStrength",
+            "tools.solveId",
+            "help.about",
+        ] {
+            assert!(allowed_in_read_only(id), "{id} should survive read-only");
+        }
+
+        for id in [
+            "file.new",
+            "file.open",
+            "file.save",
+            "file.saveAs",
+            "file.saveDataAs",
+            "file.recent.0",
+            "file.recent.clear",
+            "edit.deleteSelection",
+            "network.autoUpdate",
+            "network.rename",
+            "cases.learnCpts",
+            "cases.learnStructure",
+            "cases.simulate",
+            "cases.attachData",
+            "cases.removeData",
+            "tab.new",
+            "tab.close",
+            "tab.duplicate",
+            "ai.settings",
+            "ai.draftNetwork",
+            "ai.enterFindings",
+        ] {
+            assert!(!allowed_in_read_only(id), "{id} must be blocked in read-only");
         }
     }
 }

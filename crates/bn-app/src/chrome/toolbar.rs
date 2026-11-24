@@ -10,7 +10,7 @@ use icons::{
 };
 
 use crate::canvas::canvas::default_node_footprint;
-use crate::canvas::controller::{self, Gesture, PaletteItem, FIT_REQUEST, GESTURE, VIEWPORT};
+use crate::canvas::controller::{self, Gesture, PaletteItem, FIT_REQUEST, VIEWPORT};
 use crate::state::{exec, SELECTION, SESSION, SHOW_DATA_PANEL};
 
 const BTN: &str = "inline-flex h-7 cursor-default items-center gap-1 rounded-md border \
@@ -82,53 +82,60 @@ pub fn Toolbar() -> Element {
     let zoom_pct = (VIEWPORT.read().zoom * 100.0).round() as i32;
     let tab_has_data = SESSION.read().active_tab().data.is_some();
     let panel_open = *SHOW_DATA_PANEL.read();
+    // The toolbar can be visible while the view is read-only: drop the groups
+    // that edit the document (palette, per-node precision, auto-update) and
+    // keep compile, fit, zoom and the data panel.
+    let ro = crate::ui_config::read_only();
 
     rsx! {
         div { class: "flex shrink-0 items-center gap-2 border-b px-2 py-1",
-            for (item, label) in PALETTE {
-                button {
-                    class: "{BTN} cursor-grab",
-                    title: "Click to add at view center, or drag onto the canvas",
-                    onmousedown: move |ev| {
-                        if ev.data().trigger_button() != Some(MouseButton::Primary) {
-                            return;
-                        }
-                        ev.stop_propagation();
-                        let c = ev.data().client_coordinates();
-                        *GESTURE.write() = Gesture::PaletteDrag {
-                            item,
-                            start_client: (c.x, c.y),
-                            cur_client: (c.x, c.y),
-                        };
-                    },
-                    {palette_icon(item)}
-                    "{label}"
+            // Palette and per-node precision both edit the document.
+            if !ro {
+                for (item, label) in PALETTE {
+                    button {
+                        class: "{BTN} cursor-grab",
+                        title: "Click to add at view center, or drag onto the canvas",
+                        onmousedown: move |ev| {
+                            if ev.data().trigger_button() != Some(MouseButton::Primary) {
+                                return;
+                            }
+                            ev.stop_propagation();
+                            let c = ev.data().client_coordinates();
+                            controller::arm(Gesture::PaletteDrag {
+                                item,
+                                start_client: (c.x, c.y),
+                                cur_client: (c.x, c.y),
+                            });
+                        },
+                        {palette_icon(item)}
+                        "{label}"
+                    }
                 }
+                div { class: "h-5 w-px bg-border" }
+                button {
+                    class: "{BTN} disabled:opacity-40",
+                    title: "Decrease precision on selected nodes",
+                    disabled: !can_dec,
+                    onclick: move |_| {
+                        // Copy ids out first — exec prunes the selection, so a
+                        // held SELECTION read guard would panic.
+                        let ids: Vec<NodeId> = SELECTION.read().nodes.iter().copied().collect();
+                        exec(|s| bn_session::ops::edit::adjust_node_precision(s, &ids, -1));
+                    },
+                    DecimalsArrowLeft { class: Some("size-3.5".to_string()) }
+                }
+                button {
+                    class: "{BTN} disabled:opacity-40",
+                    title: "Increase precision on selected nodes",
+                    disabled: !can_inc,
+                    onclick: move |_| {
+                        let ids: Vec<NodeId> = SELECTION.read().nodes.iter().copied().collect();
+                        exec(|s| bn_session::ops::edit::adjust_node_precision(s, &ids, 1));
+                    },
+                    DecimalsArrowRight { class: Some("size-3.5".to_string()) }
+                }
+                div { class: "h-5 w-px bg-border" }
             }
-            div { class: "h-5 w-px bg-border" }
-            button {
-                class: "{BTN} disabled:opacity-40",
-                title: "Decrease precision on selected nodes",
-                disabled: !can_dec,
-                onclick: move |_| {
-                    // Copy ids out first — exec prunes the selection, so a
-                    // held SELECTION read guard would panic.
-                    let ids: Vec<NodeId> = SELECTION.read().nodes.iter().copied().collect();
-                    exec(|s| bn_session::ops::edit::adjust_node_precision(s, &ids, -1));
-                },
-                DecimalsArrowLeft { class: Some("size-3.5".to_string()) }
-            }
-            button {
-                class: "{BTN} disabled:opacity-40",
-                title: "Increase precision on selected nodes",
-                disabled: !can_inc,
-                onclick: move |_| {
-                    let ids: Vec<NodeId> = SELECTION.read().nodes.iter().copied().collect();
-                    exec(|s| bn_session::ops::edit::adjust_node_precision(s, &ids, 1));
-                },
-                DecimalsArrowRight { class: Some("size-3.5".to_string()) }
-            }
-            div { class: "h-5 w-px bg-border" }
             button {
                 class: BTN,
                 onclick: move |_| {
@@ -139,23 +146,26 @@ pub fn Toolbar() -> Element {
                 },
                 "⚡ Compile"
             }
-            div { class: "flex items-center gap-1.5",
-                input {
-                    id: "auto-update",
-                    r#type: "checkbox",
-                    checked: auto_update,
-                    onchange: move |ev| {
-                        let on = ev.checked();
-                        exec(|s| {
-                            bn_session::ops::edit::set_auto_update(s, on);
-                            Ok(())
-                        });
-                        crate::chrome::menu::sync_auto_update_item(on);
-                    },
+            // Auto-update is stored on the document, so it is an edit too.
+            if !ro {
+                div { class: "flex items-center gap-1.5",
+                    input {
+                        id: "auto-update",
+                        r#type: "checkbox",
+                        checked: auto_update,
+                        onchange: move |ev| {
+                            let on = ev.checked();
+                            exec(|s| {
+                                bn_session::ops::edit::set_auto_update(s, on);
+                                Ok(())
+                            });
+                            crate::chrome::menu::sync_auto_update_item(on);
+                        },
+                    }
+                    label { r#for: "auto-update", class: "text-xs", "Auto update" }
                 }
-                label { r#for: "auto-update", class: "text-xs", "Auto update" }
+                div { class: "h-5 w-px bg-border" }
             }
-            div { class: "h-5 w-px bg-border" }
             button {
                 class: BTN,
                 onclick: move |_| {
