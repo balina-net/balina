@@ -10,6 +10,7 @@ mod ai;
 mod app;
 mod canvas;
 mod chrome;
+mod data;
 mod dialogs;
 mod export;
 mod logic;
@@ -30,12 +31,19 @@ fn main() {
     }
     // A kill or crash mid-download can leave staged model files behind.
     ai::laya_local::sweep_partial_downloads();
+    // Same for data snapshots of earlier launches.
+    platform::sweep_data_cache();
     let window = WindowBuilder::new()
         .with_title("Balina")
         .with_inner_size(dioxus::desktop::LogicalSize::new(1200.0, 800.0));
     let config = Config::new()
         .with_window(window)
-        .with_menu(chrome::menu::build());
+        .with_menu(chrome::menu::build())
+        .with_custom_event_handler(|ev, _| {
+            if let dioxus::desktop::tao::event::Event::LoopDestroyed = ev {
+                platform::clear_data_cache();
+            }
+        });
     dioxus::LaunchBuilder::desktop().with_cfg(config).launch(app::App);
 }
 

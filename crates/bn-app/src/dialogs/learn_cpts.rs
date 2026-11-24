@@ -1,20 +1,17 @@
-//! Learn CPTs from a case file (counting or EM). Synchronous — fast at
-//! editor scale.
+//! Learn CPTs from a case file or the tab's data (counting or EM).
+//! Synchronous — fast at editor scale. A file that was learned from becomes
+//! the tab's data.
 
 use bn_session::ops::learn::{LearnCptsOpts, LearnMethod};
 use dioxus::prelude::*;
 
-use crate::platform::{pick_case_file, CaseFile};
-use crate::state::{close_dialog, exec_res, log_message, show_toast, LAST_CASE_FILE};
-use crate::ui::{Modal, NumberInput, BTN, BTN_PRIMARY, BTN_SM};
-
-pub fn file_label(f: &Option<CaseFile>) -> String {
-    f.as_ref().map(|f| f.label()).unwrap_or_else(|| "no file selected".into())
-}
+use crate::data::{default_source, effective_source, CaseSource, CaseSourcePicker};
+use crate::state::{close_dialog, exec_res, log_message, show_toast, SESSION};
+use crate::ui::{Modal, NumberInput, BTN, BTN_PRIMARY};
 
 #[component]
 pub fn LearnCptsDialog() -> Element {
-    let mut file: Signal<Option<CaseFile>> = use_signal(|| LAST_CASE_FILE.peek().clone());
+    let source: Signal<Option<CaseSource>> = use_signal(default_source);
     let mut method = use_signal(|| LearnMethod::Counting);
     let mut em_iters = use_signal(|| 50usize);
     let mut create_nodes = use_signal(|| true);
@@ -22,7 +19,8 @@ pub fn LearnCptsDialog() -> Element {
     let mut report: Signal<Option<String>> = use_signal(|| None);
 
     let run = move |_| {
-        let Some(f) = file.read().clone() else { return };
+        let Some(src) = effective_source(&source.read()) else { return };
+        let tab = SESSION.read().active_id();
         let opts = LearnCptsOpts {
             method: *method.read(),
             em_iters: *em_iters.read(),
@@ -30,20 +28,29 @@ pub fn LearnCptsDialog() -> Element {
             bins: *bins.read(),
         };
         spawn(async move {
-            let bytes = match f.read().await {
+            let bytes = match src.read().await {
                 Ok(b) => b,
                 Err(e) => {
                     report.set(Some(format!("Learning failed: {e}")));
                     return;
                 }
             };
-            let delim = f.forced_delim();
+            let delim = src.forced_delim();
             match exec_res(|s| bn_session::ops::learn::learn_cpts(s, &bytes, delim, opts)) {
                 Ok(res) => {
                     log_message(res.summary);
                     report.set(Some(res.report));
                     *crate::canvas::controller::FIT_REQUEST.write() += 1;
                     show_toast("Cases loaded!");
+                    if let CaseSource::File(f) = &src {
+                        crate::data::attach_bytes(
+                            tab,
+                            bytes,
+                            delim,
+                            f.label(),
+                            bn_session::ops::data::ORIGIN_LEARN_CPTS,
+                        );
+                    }
                 }
                 Err(e) => report.set(Some(format!("Learning failed: {e}"))),
             }
@@ -59,28 +66,13 @@ pub fn LearnCptsDialog() -> Element {
                 button { class: BTN, onclick: move |_| close_dialog(), "Close" }
                 button {
                     class: BTN_PRIMARY,
-                    disabled: file.read().is_none(),
+                    disabled: effective_source(&source.read()).is_none(),
                     onclick: run,
                     "Learn"
                 }
             },
             div { class: "space-y-3 text-sm",
-                div { class: "flex items-center gap-2",
-                    button {
-                        class: BTN_SM,
-                        onclick: move |_| {
-                            spawn(async move {
-                                if let Some(f) = pick_case_file().await {
-                                    file.set(Some(f));
-                                }
-                            });
-                        },
-                        "Choose CSV/TSV…"
-                    }
-                    span { class: "truncate font-mono text-xs text-muted-foreground",
-                        "{file_label(&file.read())}"
-                    }
-                }
+                CaseSourcePicker { source, disabled: false }
                 div { class: "flex items-center gap-1.5",
                     input {
                         id: "lc-create",

@@ -6,7 +6,7 @@ pub mod em;
 pub mod import;
 pub mod structure;
 
-pub use cases::{read_cases, read_cases_with, sniff_delimiter, write_cases, CaseSet};
+pub use cases::{case_reader, read_cases, read_cases_with, sniff_delimiter, write_cases, CaseSet};
 pub use import::{import_cases_with, ColumnReport, ImportOptions};
 pub use crate::model::ContinuousInfo;
 pub use counting::{learn_counting, CountingOptions, LearnReport};

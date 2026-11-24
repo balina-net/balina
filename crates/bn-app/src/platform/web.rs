@@ -10,6 +10,7 @@ use bn_session::patch::StructurePatch;
 use bn_session::views::StructureLearnResult;
 use bn_session::{CmdError, Session};
 
+use crate::data::CaseSource;
 use crate::state::LAST_CASE_FILE;
 
 /// A picked case file: a browser file handle (stays readable after the
@@ -31,6 +32,35 @@ impl CaseFile {
     pub async fn read(&self) -> Result<Vec<u8>, String> {
         Ok(self.handle.read().await)
     }
+
+    pub fn is_baltsv(&self) -> bool {
+        self.label().to_ascii_lowercase().ends_with(".baltsv")
+    }
+}
+
+/// Pick a file to attach as a tab's data (CSV/TSV, or a `.baltsv`).
+pub async fn pick_data_file() -> Option<CaseFile> {
+    let fh = rfd::AsyncFileDialog::new()
+        .set_title("Choose data file")
+        .add_filter("Case data", &["csv", "tsv", "baltsv"])
+        .pick_file()
+        .await?;
+    Some(CaseFile { handle: Rc::new(fh) })
+}
+
+/// Read a picked `.baltsv` into memory.
+pub async fn load_baltsv(file: &CaseFile) -> Result<bn_session::ops::data::LoadedData, String> {
+    bn_session::ops::data::load_baltsv_bytes(file.read().await?).map_err(|e| e.to_string())
+}
+
+/// No threads on the web: run `f` right here.
+pub async fn run_blocking<T>(f: impl FnOnce() -> T) -> Result<T, String> {
+    Ok(f())
+}
+
+/// The web keeps data in memory.
+pub fn data_cache_dir() -> Option<std::path::PathBuf> {
+    None
 }
 
 /// Pick a CSV/TSV case file (browser file input).
@@ -79,6 +109,21 @@ pub async fn fetch_text(url: &str) -> Result<String, String> {
     }
     let text = JsFuture::from(resp.text().map_err(js_err)?).await.map_err(js_err)?;
     text.as_string().ok_or_else(|| "response body is not text".into())
+}
+
+/// GET `url` and return the body as bytes (binary files: `.balpck`).
+pub async fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+
+    let window = web_sys::window().ok_or("no window")?;
+    let resp = JsFuture::from(window.fetch_with_str(url)).await.map_err(js_err)?;
+    let resp: web_sys::Response = resp.dyn_into().map_err(js_err)?;
+    if !resp.ok() {
+        return Err(format!("HTTP {} {}", resp.status(), resp.status_text()));
+    }
+    let buf = JsFuture::from(resp.array_buffer().map_err(js_err)?).await.map_err(js_err)?;
+    Ok(js_sys::Uint8Array::new(&buf).to_vec())
 }
 
 /// The browser tab title.
@@ -159,7 +204,7 @@ pub enum StructureOutcome {
 /// progress into `JOB_PROGRESS`. `Err` = the worker itself failed to start.
 pub async fn run_structure_job(
     input: StructureJobInput,
-    cases: CaseFile,
+    cases: CaseSource,
 ) -> Result<StructureOutcome, String> {
     crate::platform::worker::run(input, cases).await
 }

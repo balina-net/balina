@@ -168,6 +168,46 @@ pub static LAST_CASE_FILE: GlobalSignal<Option<crate::platform::CaseFile>> =
 pub static JOB_PROGRESS: GlobalSignal<Option<bn_session::jobs::JobEvent>> =
     Signal::global(|| None);
 
+/// The right-docked data panel (session-only, like the message log).
+pub static SHOW_DATA_PANEL: GlobalSignal<bool> = Signal::global(|| false);
+pub static DATA_PANEL_WIDTH: GlobalSignal<f64> = Signal::global(|| 420.0);
+
+/// "Data found" banner above the canvas after opening a project whose data
+/// came along (sidecar or pack); holds the message.
+pub static DATA_BANNER: GlobalSignal<Option<String>> = Signal::global(|| None);
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum DataJobKind {
+    /// Converting a case file into a tab's data.
+    Prepare,
+    /// Extracting a pack's data after opening it.
+    Extract,
+    /// Indexing data read in place, for the panel.
+    Index,
+}
+
+/// A background data job (see `crate::data`).
+#[derive(Clone, PartialEq, Debug)]
+pub struct DataJob {
+    pub id: u64,
+    pub kind: DataJobKind,
+    /// The tab it is for (`None`: the whole project).
+    pub tab: Option<TabId>,
+    /// For `Index`: the body being indexed.
+    pub body: Option<u64>,
+    pub frac: Option<f32>,
+}
+
+pub static DATA_JOBS: GlobalSignal<Vec<DataJob>> = Signal::global(Vec::new);
+
+/// Bodies (by `TabData::body_id`) that could not be read, with the error:
+/// the panel shows it instead of retrying.
+pub static DATA_ERRORS: GlobalSignal<HashMap<u64, String>> = Signal::global(HashMap::new);
+
+/// The `.baltsv` whose sections `DialogDesc::DataSectionPick` lists.
+pub static SECTION_PICK: GlobalSignal<Option<std::sync::Arc<bn_session::ops::data::LoadedData>>> =
+    Signal::global(|| None);
+
 #[derive(Clone, PartialEq)]
 pub enum DialogDesc {
     NodeProperties { node: NodeId },
@@ -181,6 +221,9 @@ pub enum DialogDesc {
     IdSolution { text: String },
     RenameNetwork,
     RenameTab { id: bn_session::TabId },
+    /// Pick which section of a foreign `.baltsv` (in `SECTION_PICK`) to
+    /// attach to `tab`.
+    DataSectionPick { tab: TabId },
     About,
     /// Desktop only: global AI provider configuration.
     #[cfg(not(target_arch = "wasm32"))]

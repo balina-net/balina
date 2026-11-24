@@ -31,7 +31,7 @@ pub fn set_cpt(s: &mut Session, node: NodeId, data: Vec<f64>) -> Result<(), CmdE
     check_table_shape(s, node, data.len())?;
     s.doc_mut().begin_change();
     if let Err(e) = s.doc_mut().net.set_table(node, Table { data }) {
-        s.doc_mut().undo();
+        s.doc_mut().rollback_change();
         return Err(e.into());
     }
     s.doc_mut().net.normalize_table(node);

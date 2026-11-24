@@ -20,7 +20,17 @@ pub use imp::MenuBar;
 mod imp {
     use dioxus::prelude::*;
 
-    use crate::state::SESSION;
+    use crate::state::{SESSION, SHOW_DATA_PANEL};
+
+    /// What a checkable item's checkmark reflects.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Check {
+        None,
+        /// `doc.auto_update`.
+        AutoUpdate,
+        /// The data panel is open.
+        DataPanel,
+    }
 
     struct Item {
         id: &'static str,
@@ -28,18 +38,17 @@ mod imp {
         /// Shown as a hint; the shortcut itself lives in `chrome::hotkeys`.
         accel: Option<&'static str>,
         sep_before: bool,
-        /// Renders a checkmark from `doc.auto_update`.
-        auto_update_check: bool,
+        check: Check,
     }
 
     const fn item(id: &'static str, label: &'static str) -> Item {
-        Item { id, label, accel: None, sep_before: false, auto_update_check: false }
+        Item { id, label, accel: None, sep_before: false, check: Check::None }
     }
     const fn item_accel(id: &'static str, label: &'static str, accel: &'static str) -> Item {
-        Item { id, label, accel: Some(accel), sep_before: false, auto_update_check: false }
+        Item { id, label, accel: Some(accel), sep_before: false, check: Check::None }
     }
     const fn item_sep(id: &'static str, label: &'static str) -> Item {
-        Item { id, label, accel: None, sep_before: true, auto_update_check: false }
+        Item { id, label, accel: None, sep_before: true, check: Check::None }
     }
 
     const MENUS: &[(&str, &[Item])] = &[
@@ -54,7 +63,7 @@ mod imp {
                     label: "Save As…",
                     accel: Some("⇧⌘S"),
                     sep_before: false,
-                    auto_update_check: false,
+                    check: Check::None,
                 },
                 item_sep("file.exportSvg", "Export as SVG"),
                 item("file.exportPng", "Export as PNG"),
@@ -80,14 +89,14 @@ mod imp {
                     label: "Compile Now",
                     accel: Some("F5"),
                     sep_before: true,
-                    auto_update_check: false,
+                    check: Check::None,
                 },
                 Item {
                     id: "network.autoUpdate",
                     label: "Auto Update Beliefs",
                     accel: None,
                     sep_before: false,
-                    auto_update_check: true,
+                    check: Check::AutoUpdate,
                 },
                 item_sep("network.removeFindings", "Remove All Findings"),
                 item("network.rename", "Network Name…"),
@@ -99,6 +108,15 @@ mod imp {
                 item("cases.learnCpts", "Learn CPTs from Cases…"),
                 item("cases.learnStructure", "Learn Structure from Cases…"),
                 item("cases.simulate", "Simulate Cases…"),
+                item_sep("cases.attachData", "Attach Data…"),
+                item("cases.removeData", "Remove Data"),
+                Item {
+                    id: "cases.showDataPanel",
+                    label: "Show Data Panel",
+                    accel: None,
+                    sep_before: false,
+                    check: Check::DataPanel,
+                },
             ],
         ),
         (
@@ -115,12 +133,22 @@ mod imp {
     const MENU_BTN: &str = "rounded px-2 py-0.5 text-sm hover:bg-accent";
     const MENU_BTN_OPEN: &str = "rounded px-2 py-0.5 text-sm bg-accent";
     const MENU_ITEM: &str = "flex w-full cursor-default items-center justify-between gap-6 \
-                             rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent";
+                             rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent \
+                             disabled:pointer-events-none disabled:opacity-50";
 
     #[component]
     pub fn MenuBar() -> Element {
         let mut open: Signal<Option<usize>> = use_signal(|| None);
-        let auto_update = SESSION.read().doc().auto_update;
+        let (auto_update, tab_has_data) = {
+            let s = SESSION.read();
+            (s.doc().auto_update, s.active_tab().data.is_some())
+        };
+        let panel_open = *SHOW_DATA_PANEL.read();
+        let checked = move |c: Check| match c {
+            Check::None => false,
+            Check::AutoUpdate => auto_update,
+            Check::DataPanel => panel_open,
+        };
         let is_open = *open.read();
 
         rsx! {
@@ -154,6 +182,7 @@ mod imp {
                                     }
                                     button {
                                         class: MENU_ITEM,
+                                        disabled: it.id == "cases.removeData" && !tab_has_data,
                                         onclick: {
                                             let id = it.id;
                                             move |_| {
@@ -162,8 +191,8 @@ mod imp {
                                             }
                                         },
                                         span {
-                                            if it.auto_update_check {
-                                                if auto_update { "✓ {it.label}" } else { "{it.label}" }
+                                            if checked(it.check) {
+                                                "✓ {it.label}"
                                             } else {
                                                 "{it.label}"
                                             }

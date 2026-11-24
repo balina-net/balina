@@ -1,14 +1,17 @@
 //! Toolbar: node palette (click to add at view center, drag onto canvas),
-//! compile, auto-update, fit view, zoom display.
+//! compile, auto-update, fit view, zoom display, data-panel toggle.
 
 use bn_core::model::{NodeId, NodeKind};
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
-use icons::{DecimalsArrowLeft, DecimalsArrowRight, Diamond, Dices, SquareSplitVertical, StickyNote};
+use icons::{
+    DecimalsArrowLeft, DecimalsArrowRight, Diamond, Dices, PanelRightClose, PanelRightOpen,
+    SquareSplitVertical, StickyNote,
+};
 
 use crate::canvas::canvas::default_node_footprint;
 use crate::canvas::controller::{self, Gesture, PaletteItem, FIT_REQUEST, GESTURE, VIEWPORT};
-use crate::state::{exec, SELECTION, SESSION};
+use crate::state::{exec, SELECTION, SESSION, SHOW_DATA_PANEL};
 
 const BTN: &str = "inline-flex h-7 cursor-default items-center gap-1 rounded-md border \
                    bg-background px-2 text-xs shadow-xs hover:bg-accent";
@@ -77,6 +80,8 @@ pub fn Toolbar() -> Element {
         (dec, inc)
     };
     let zoom_pct = (VIEWPORT.read().zoom * 100.0).round() as i32;
+    let tab_has_data = SESSION.read().active_tab().data.is_some();
+    let panel_open = *SHOW_DATA_PANEL.read();
 
     rsx! {
         div { class: "flex shrink-0 items-center gap-2 border-b px-2 py-1",
@@ -176,6 +181,20 @@ pub fn Toolbar() -> Element {
                     title: "Zoom in (Cmd/Ctrl+=)",
                     onclick: move |_| controller::zoom_center(1.25),
                     "+"
+                }
+                div { class: "mx-1 h-5 w-px bg-border" }
+                // The icon shows the action; greyed out while the tab has no data.
+                button {
+                    class: "{BTN} disabled:opacity-40",
+                    title: if panel_open { "Hide the data panel" } else { "Show the data panel" },
+                    disabled: !tab_has_data,
+                    onclick: move |_| crate::data::toggle_panel(),
+                    if panel_open {
+                        PanelRightClose { class: Some("size-3.5".to_string()) }
+                    } else {
+                        PanelRightOpen { class: Some("size-3.5".to_string()) }
+                    }
+                    "View data"
                 }
             }
         }

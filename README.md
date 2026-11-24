@@ -10,9 +10,9 @@ Bayesian And Logical Influence-diagram Network Application
 
 Demos available for the WebAssembly version:
 
-- [PISA report 2025 - Spain](https://alinatudoran.github.io/balina?file=https://raw.githubusercontent.com/alinatudoran/balina/refs/heads/master/examples/pisa_spain_2025.balina)
-- [Chest Clinic](https://alinatudoran.github.io/balina?file=https://raw.githubusercontent.com/alinatudoran/balina/refs/heads/master/examples/asia.balina)
-- [Umbrella (Decision & Utility nodes are used)](https://alinatudoran.github.io/balina/?file=https://raw.githubusercontent.com/alinatudoran/balina/refs/heads/master/examples/umbrella.balina)
+- [PISA report 2025 - Spain](https://balina-net.github.io/balina?file=https://raw.githubusercontent.com/balina-net/balina/refs/heads/master/examples/pisa_spain_2025.balina)
+- [Chest Clinic](https://balina-net.github.io/balina?file=https://raw.githubusercontent.com/balina-net/balina/refs/heads/master/examples/asia.balina)
+- [Umbrella (Decision & Utility nodes are used)](https://balina-net.github.io/balina?file=https://raw.githubusercontent.com/balina-net/balina/refs/heads/master/examples/umbrella.balina)
 
 
 

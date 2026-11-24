@@ -26,7 +26,9 @@ crates/bn-app/src/state (global Dioxus signals — the only mutation gateway)
 ├── DIALOG / CONTEXT_MENU            single-slot descriptors
 ├── MESSAGES / SHOW_MESSAGES         message log (cap 300)
 ├── TYPING                           not-while-typing hotkey guard
-└── JOB_PROGRESS / LAST_CASE_DIR     background-job UI state
+├── JOB_PROGRESS / LAST_CASE_DIR     background-job UI state
+└── SHOW_DATA_PANEL / DATA_PANEL_WIDTH / DATA_BANNER / DATA_JOBS / SECTION_PICK
+                                     data panel + background data jobs
 
 crates/bn-app/src/canvas (the node editor)
 ├── geometry.rs           Pt/Rect, node_size, clip_to_border, Viewport (PURE, tested)
@@ -145,10 +147,20 @@ bars don't blank; **conflict is a normal view state, never an error**), and
   `set_likelihood_finding(node, values)` (soft evidence),
   `retract_finding`, `retract_all_findings`.
 - **Undo/compile**: `undo`, `redo`, `recompute`, `set_auto_update`.
-- **Learning/tools**: `learn_cpts(path, opts)`, the structure-job trio
-  (below), `simulate_cases_to_file(net, path, n, missing_pct)` (takes a
-  clone so it runs off the session), `run_sensitivity(target)`,
+- **Learning/tools**: `learn_cpts(bytes, delim, opts)`, the structure-job
+  trio (below), `simulate_cases_csv(net, n, missing_pct)` (takes a clone so
+  it runs off the session), `run_sensitivity(target)`,
   `solve_influence_diagram`.
+- **Data** (`ops/data.rs`): per-tab case data (`Tab::data: Option<TabData>`,
+  outside `Document`, so not undoable). `prepare` converts a case file into
+  a section body (off the session; desktop: a snapshot in the cache dir,
+  web: memory) and `attach`/`remove` put it on a tab. `read_rows`, `index`,
+  `case_bytes` (TSV for learning from the tab's data) read it.
+  `save_sidecar` / `discover_sidecar` keep `<stem>.baltsv` in step with a
+  `.balina`; `extract_pack_file` + `attach_pack_data` bring a `.balpck`'s
+  data in. Bodies are `Arc`-shared (duplicate tab = same body) and temp
+  snapshots are deleted when the last holder drops them; a signature of
+  body ids lets saves skip unchanged data.
 
 Errors are `CmdError` (thiserror enum); `state::exec` logs them,
 `Stale`/`Cancelled` get friendly dialog text.
@@ -174,6 +186,14 @@ The UI never holds a session borrow while the job runs
 
 `cancel_structure_job` flips the flag; the learners poll it via
 `SearchCtrl`. `apply_structure_outcome` always clears the busy slot.
+
+Data jobs (`crate::data`) follow the same rule: converting a case file,
+extracting a pack's data and indexing a sidecar read in place run in
+`platform::run_blocking` (desktop: `spawn_blocking`; web: inline) from
+`spawn_forever` tasks, so closing the dialog that started one does not lose
+it. Each is listed in `DATA_JOBS` (progress via an atomic the body writes
+and a UI loop mirrors); Save waits for conversions and extractions. Data is
+attached only after learning or simulation succeeds.
 
 ## The canvas
 
@@ -263,12 +283,27 @@ item handle lives in a thread-local for `sync_auto_update_item`.
 
 Chrome: `Toolbar` (palette, selected-node decimal precision −/+ [per-node,
 0..=8, persisted, undoable; disabled with no node selected], ⚡ Compile,
-auto-update, fit view, zoom %),
+auto-update, fit view, zoom %, "View data" data-panel toggle [icon
+PanelRightOpen/PanelRightClose; disabled while the active tab has no data]),
 `StatusBar` (name + `*`, Compiled/Stale/⚠ conflict, P(findings) via
-`exp(log_p_e)`, node/link counts, update ms, log toggle), `MessageLog`
+`exp(log_p_e)`, node/link counts, data-job progress, update ms, data-panel
+and log toggles), `MessageLog`
 (monospace, stick-to-bottom, cap 300), window title synced by a
 `use_effect` on `SESSION`. File pickers are `rfd::AsyncFileDialog` in
 `spawn`ed tasks; unsaved-changes confirms use `rfd::AsyncMessageDialog`.
+
+**Data panel** (`data/panel.rs`): right-docked beside the canvas (the
+canvas re-measures itself), resizable from its left edge (280 px to 70% of
+the window; width and visibility are session-only), toggled from Cases >
+Show Data Panel or the status bar. It is outside the `DIALOG` slot, so
+Escape and other dialogs leave it alone, and it shows the active tab's
+data. The table is virtualized: fixed 24 px rows between two spacer rows,
+`onscroll` → visible range → a ~200-row window read through the body's
+sparse index (sidecars read in place are indexed lazily on first view).
+Past ~10M px of rows the scroll range is compressed (browser element-height
+caps). Columns matching no node are dimmed; a footer shows rows × cols,
+origin, source and date, plus "Go to row". After opening a project whose
+data came along (sidecar or pack), a banner offers "View data".
 
 ## Dialogs
 

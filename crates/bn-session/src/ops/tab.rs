@@ -61,6 +61,8 @@ pub fn duplicate_tab(s: &mut Session, id: TabId) -> Result<TabId, CmdError> {
     let src = s.tab(id);
     let mut new_tab = Tab::new();
     new_tab.doc = src.doc.clone_for_duplicate();
+    // Same body, new uid: the copy gets its own sidecar section on save.
+    new_tab.data = src.data.clone();
     let name = format!("{} (Copy)", new_tab.doc.net.name);
     new_tab.doc.net.name = name;
     new_tab.bridge.invalidate();

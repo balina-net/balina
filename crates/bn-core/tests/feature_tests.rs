@@ -330,9 +330,9 @@ fn umbrella_brute_meu(net: &Network) -> (f64, Vec<usize>) {
         for a_sunny in 0..2 {
             let mut eu = 0.0;
             for weather in 0..2 {
-                for fc in 0..2 {
+                for (fc, &p_fc) in f_given_w[weather].iter().enumerate() {
                     let act = if fc == 0 { a_rainy } else { a_sunny };
-                    eu += w[weather] * f_given_w[weather][fc] * u(weather, act);
+                    eu += w[weather] * p_fc * u(weather, act);
                 }
             }
             if eu > best.0 {
@@ -457,6 +457,27 @@ fn native_json_without_precision_field_defaults_to_2() {
     };
     let back = io::load_str(&stripped, Format::NativeJson).unwrap();
     assert_eq!(back.visual.precision, 2);
+}
+
+#[test]
+fn native_json_project_and_tab_uids_roundtrip() {
+    let doc = Document { network: asia(), visual: Default::default() };
+    let project = io::Project {
+        uid: "00000000000000aa".into(),
+        sheets: vec![io::ProjectSheet { label: "Asia".into(), uid: "00000000000000bb".into(), doc }],
+        active: 0,
+    };
+    let text = io::save_project_str(&project).unwrap();
+    let back = io::load_project_str(&text).unwrap();
+    assert_eq!(back.uid, "00000000000000aa");
+    assert_eq!(back.sheets[0].uid, "00000000000000bb");
+    assert_eq!(io::save_project_str(&back).unwrap(), text);
+    // Files saved before uids existed load with empty ones (the session
+    // fills them in) and stay uid-free when nobody assigns any.
+    let legacy = io::save_str(&back.sheets[0].doc, Format::NativeJson).unwrap().0;
+    assert!(!legacy.contains("\"uid\""));
+    let old = io::load_project_str(&legacy).unwrap();
+    assert!(old.uid.is_empty() && old.sheets[0].uid.is_empty());
 }
 
 #[test]

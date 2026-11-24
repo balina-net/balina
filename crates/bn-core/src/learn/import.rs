@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use crate::error::CaseError;
 use crate::model::{ContinuousInfo, Network, NodeId, NodeKind, State};
 
-use super::cases::{is_missing, load_bytes, state_for_value, CaseSet};
+use super::cases::{case_reader, is_missing, read_all, state_for_value, CaseSet};
 
 /// Numeric columns with more distinct values than this are continuous.
 pub const DISTINCT_CONTINUOUS: usize = 8;
@@ -89,13 +89,8 @@ pub fn import_cases_with<R: std::io::Read>(
     delimiter: Option<u8>,
     opts: &ImportOptions,
 ) -> Result<(CaseSet, Vec<ColumnReport>), CaseError> {
-    let (data, delim) = load_bytes(reader, delimiter)?;
-    let make_reader = || {
-        csv::ReaderBuilder::new()
-            .delimiter(delim)
-            .trim(csv::Trim::All)
-            .from_reader(data.as_slice())
-    };
+    let data = read_all(reader)?;
+    let make_reader = || case_reader(&data, delimiter);
 
     // ---- pass 1: accumulate per-column summaries -----------------------
     let mut rdr = make_reader();
@@ -213,7 +208,7 @@ pub fn import_cases_with<R: std::io::Read>(
                 });
             }
             let mut names = acc.distinct;
-            names.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+            names.sort_by_key(|a| a.to_ascii_lowercase());
             let states: Vec<State> = names
                 .iter()
                 .map(|n| State { name: n.clone(), value: n.parse::<f64>().ok().filter(|v| v.is_finite()) })

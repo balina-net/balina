@@ -14,12 +14,11 @@ use bn_session::ops::learn::{LearnMethod, ScoreChoice, StructAlgo, StructureLear
 use bn_session::CmdError;
 use dioxus::prelude::*;
 
-use crate::dialogs::learn_cpts::file_label;
-use crate::platform::{pick_case_file, CaseFile};
+use crate::data::{default_source, effective_source, CaseSource, CaseSourcePicker};
 use crate::state::{
-    close_dialog, exec, exec_res, log_message, show_toast, JOB_PROGRESS, LAST_CASE_FILE, SESSION,
+    close_dialog, exec, exec_res, log_message, show_toast, JOB_PROGRESS, SESSION,
 };
-use crate::ui::{Modeless, NumberInput, BTN, BTN_PRIMARY, BTN_SM, SELECT};
+use crate::ui::{Modeless, NumberInput, BTN, BTN_PRIMARY, SELECT};
 
 struct AlgoCfg {
     value: StructAlgo,
@@ -41,7 +40,7 @@ const ALGOS: [AlgoCfg; 7] = [
 
 #[component]
 pub fn StructureLearnDialog() -> Element {
-    let mut file: Signal<Option<CaseFile>> = use_signal(|| LAST_CASE_FILE.peek().clone());
+    let source: Signal<Option<CaseSource>> = use_signal(default_source);
     let mut algo = use_signal(|| StructAlgo::HillClimb);
     let mut score = use_signal(|| ScoreChoice::Bic);
     let mut ess = use_signal(|| 1.0f64);
@@ -73,14 +72,14 @@ pub fn StructureLearnDialog() -> Element {
     // The class node may vanish via undo.
     let class_valid =
         class_node.read().is_some_and(|c| chance_nodes.iter().any(|(id, _)| *id == c));
-    let can_run = file.read().is_some()
+    let can_run = effective_source(&source.read()).is_some()
         && chance_nodes.len() >= 2
         && (!cfg.class || class_valid)
         && !*running.read();
 
     let needs_class = cfg.class;
     let run = move |_| {
-        let Some(case_file) = file.read().clone() else { return };
+        let Some(case_source) = effective_source(&source.read()) else { return };
         let opts = StructureLearnOpts {
             algo: *algo.read(),
             score: *score.read(),
@@ -109,7 +108,7 @@ pub fn StructureLearnDialog() -> Element {
                 };
             let started_seq = input.started_seq;
             let tab_id = input.tab_id;
-            match crate::platform::run_structure_job(input, case_file).await {
+            match crate::platform::run_structure_job(input, case_source.clone()).await {
                 Ok(outcome) => {
                     match exec_res(|s| {
                         crate::platform::apply_structure_outcome(s, tab_id, outcome, started_seq)
@@ -122,6 +121,11 @@ pub fn StructureLearnDialog() -> Element {
                             report.set(Some(res.report));
                             *crate::canvas::controller::FIT_REQUEST.write() += 1;
                             show_toast("Learned structures!");
+                            crate::data::attach_source(
+                                tab_id,
+                                case_source,
+                                bn_session::ops::data::ORIGIN_LEARN_STRUCTURE,
+                            );
                         }
                         Err(CmdError::Cancelled) => report.set(Some("Cancelled.".into())),
                         Err(e @ CmdError::Stale(_)) => report.set(Some(e.to_string())),
@@ -168,23 +172,7 @@ pub fn StructureLearnDialog() -> Element {
                 button { class: BTN_PRIMARY, disabled: !can_run, onclick: run, "Learn" }
             },
             div { class: "space-y-3 text-sm",
-                div { class: "flex items-center gap-2",
-                    button {
-                        class: BTN_SM,
-                        disabled: *running.read(),
-                        onclick: move |_| {
-                            spawn(async move {
-                                if let Some(f) = pick_case_file().await {
-                                    file.set(Some(f));
-                                }
-                            });
-                        },
-                        "Choose CSV/TSV…"
-                    }
-                    span { class: "truncate font-mono text-xs text-muted-foreground",
-                        "{file_label(&file.read())}"
-                    }
-                }
+                CaseSourcePicker { source, disabled: *running.read() }
                 div { class: "flex items-center gap-2",
                     label { class: "w-24", "Algorithm:" }
                     select {
@@ -398,14 +386,13 @@ pub fn StructureLearnDialog() -> Element {
                                             || *new_req_from.read() == *new_req_to.read()
                                             || *running.read(),
                                         onclick: move |_| {
-                                            if let (Some(p), Some(c)) =
-                                                (*new_req_from.read(), *new_req_to.read())
+                                            let (from, to) =
+                                                (*new_req_from.read(), *new_req_to.read());
+                                            if let (Some(p), Some(c)) = (from, to)
+                                                && p != c
+                                                && !required_edges.read().contains(&(p, c))
                                             {
-                                                if p != c
-                                                    && !required_edges.read().contains(&(p, c))
-                                                {
-                                                    required_edges.write().push((p, c));
-                                                }
+                                                required_edges.write().push((p, c));
                                             }
                                         },
                                         "Add"
@@ -477,14 +464,13 @@ pub fn StructureLearnDialog() -> Element {
                                             || *new_forb_from.read() == *new_forb_to.read()
                                             || *running.read(),
                                         onclick: move |_| {
-                                            if let (Some(p), Some(c)) =
-                                                (*new_forb_from.read(), *new_forb_to.read())
+                                            let (from, to) =
+                                                (*new_forb_from.read(), *new_forb_to.read());
+                                            if let (Some(p), Some(c)) = (from, to)
+                                                && p != c
+                                                && !forbidden_edges.read().contains(&(p, c))
                                             {
-                                                if p != c
-                                                    && !forbidden_edges.read().contains(&(p, c))
-                                                {
-                                                    forbidden_edges.write().push((p, c));
-                                                }
+                                                forbidden_edges.write().push((p, c));
                                             }
                                         },
                                         "Add"

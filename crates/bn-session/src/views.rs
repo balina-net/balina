@@ -59,6 +59,8 @@ pub fn ancestor_sets(net: &Network) -> SecondaryMap<NodeId, HashSet<NodeId>> {
 pub struct SaveResult {
     pub path: std::path::PathBuf,
     pub warnings: Vec<String>,
+    /// Informational lines (e.g. the data sidecar was written).
+    pub notes: Vec<String>,
 }
 
 #[derive(Clone, Debug)]

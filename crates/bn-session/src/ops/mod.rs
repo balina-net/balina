@@ -4,6 +4,7 @@
 //! call the functions.
 
 pub mod cpt;
+pub mod data;
 pub mod edit;
 pub mod evidence;
 pub mod file;

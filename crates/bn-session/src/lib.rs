@@ -9,6 +9,7 @@
 pub mod ai_cpt;
 pub mod ai_draft;
 pub mod ai_evidence;
+pub mod data;
 pub mod doc;
 pub mod engine_bridge;
 pub mod error;
@@ -27,4 +28,5 @@ pub use doc::{
 };
 pub use engine_bridge::EngineBridge;
 pub use error::CmdError;
+pub use data::TabData;
 pub use session::{Session, Tab, TabId};

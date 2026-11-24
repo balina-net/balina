@@ -22,7 +22,8 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Blob, BlobPropertyBag, MessageEvent, Url, Worker};
 
-use super::web::{CaseFile, StructureOutcome};
+use super::web::StructureOutcome;
+use crate::data::CaseSource;
 use crate::state::JOB_PROGRESS;
 
 const SHIM_JS: &str = include_str!("../../assets/worker/worker_shim.js");
@@ -63,7 +64,7 @@ fn build_request(input: &StructureJobInput, tsv: bool) -> Result<String, String>
     serde_json::to_string(&req).map_err(|e| e.to_string())
 }
 
-pub async fn run(input: StructureJobInput, cases: CaseFile) -> Result<StructureOutcome, String> {
+pub async fn run(input: StructureJobInput, cases: CaseSource) -> Result<StructureOutcome, String> {
     if WORKER_WASM.is_empty() {
         return Err("the learning worker was not compiled in — run \
                     scripts/build-worker.sh and rebuild the app"

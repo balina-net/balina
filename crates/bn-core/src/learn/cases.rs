@@ -32,22 +32,23 @@ pub(crate) fn is_missing(s: &str) -> bool {
     matches!(s.trim(), "" | "*" | "?" | "NA" | "na" | "N/A")
 }
 
-/// Read all bytes, strip a UTF-8 BOM, and resolve the delimiter (sniffed
-/// from the header line unless forced).
-pub(crate) fn load_bytes<R: std::io::Read>(
-    mut reader: R,
-    delimiter: Option<u8>,
-) -> Result<(Vec<u8>, u8), CaseError> {
+pub(crate) fn read_all<R: std::io::Read>(mut reader: R) -> Result<Vec<u8>, CaseError> {
     let mut data = Vec::new();
     reader.read_to_end(&mut data)?;
-    if data.starts_with(b"\xEF\xBB\xBF") {
-        data.drain(..3);
-    }
+    Ok(data)
+}
+
+/// The CSV reader every case consumer shares (learning, import, the
+/// `.baltsv` converter), so they agree on what a case file means: a UTF-8
+/// BOM is stripped, the delimiter is sniffed from the header line unless
+/// forced, and cells are trimmed.
+pub fn case_reader(data: &[u8], delimiter: Option<u8>) -> csv::Reader<&[u8]> {
+    let data = data.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(data);
     let delim = delimiter.unwrap_or_else(|| {
         let first_line = data.split(|&b| b == b'\n').next().unwrap_or(&[]);
         sniff_delimiter(String::from_utf8_lossy(first_line).trim_end_matches('\r'))
     });
-    Ok((data, delim))
+    csv::ReaderBuilder::new().delimiter(delim).trim(csv::Trim::All).from_reader(data)
 }
 
 /// Map a raw cell to a state index: state name, numeric state index, or —
@@ -57,24 +58,25 @@ pub(crate) fn state_for_value(node: &Node, raw: &str) -> Result<usize, CaseError
     if let Some(s) = node.state_index(raw) {
         return Ok(s);
     }
-    if let Ok(s) = raw.parse::<usize>() {
-        if s < node.n_states() {
-            return Ok(s);
-        }
+    if let Ok(s) = raw.parse::<usize>()
+        && s < node.n_states()
+    {
+        return Ok(s);
     }
-    if let Ok(x) = raw.parse::<f64>() {
-        if !node.states.is_empty() && node.states.iter().all(|s| s.value.is_some()) {
-            let best = node
-                .states
-                .iter()
-                .enumerate()
-                .min_by(|(_, a), (_, b)| {
-                    (a.value.unwrap() - x).abs().total_cmp(&(b.value.unwrap() - x).abs())
-                })
-                .map(|(i, _)| i)
-                .unwrap();
-            return Ok(best);
-        }
+    if let Ok(x) = raw.parse::<f64>()
+        && !node.states.is_empty()
+        && node.states.iter().all(|s| s.value.is_some())
+    {
+        let best = node
+            .states
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                (a.value.unwrap() - x).abs().total_cmp(&(b.value.unwrap() - x).abs())
+            })
+            .map(|(i, _)| i)
+            .unwrap();
+        return Ok(best);
     }
     Err(CaseError::UnknownState { node: node.name.clone(), value: raw.to_string() })
 }
@@ -114,11 +116,8 @@ pub fn read_cases_with<R: std::io::Read>(
     reader: R,
     delimiter: Option<u8>,
 ) -> Result<CaseSet, CaseError> {
-    let (data, delim) = load_bytes(reader, delimiter)?;
-    let mut rdr = csv::ReaderBuilder::new()
-        .delimiter(delim)
-        .trim(csv::Trim::All)
-        .from_reader(data.as_slice());
+    let data = read_all(reader)?;
+    let mut rdr = case_reader(&data, delimiter);
     let headers = rdr.headers()?.clone();
     let mut cols: Vec<(usize, NodeId)> = Vec::new();
     let mut weight_col: Option<usize> = None;
