@@ -133,8 +133,15 @@ Part of `cargo test --workspace`:
 - `canvas/scene` — document→geometry projection, optimistic drag override,
   scene bounds, TitleOnly sizing from title/name.
 - `canvas/controller` — drag-delta zoom scaling, rubber-band rect
-  normalization.
+  normalization, and `Gesture::mutates` (which gestures the read-only view
+  must drop — paired with an exhaustive `match`, a new variant is a compile
+  error until classified).
 - `logic/format` — `{:5.1}` percentage alignment, `{:.4e}`, expected value.
+- `ui_config` — the `?ui={json}` startup parameter: defaults, partial objects,
+  unknown keys, wrong types, string/number coercion, and fail-open on
+  malformed input.
+- `chrome/menu` — `allowed_in_read_only`, both directions. The menu table is
+  where a new item is most likely to silently widen the read-only gate.
 
 ## What is NOT covered (candidates for new tests)
 

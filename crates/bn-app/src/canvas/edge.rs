@@ -7,7 +7,7 @@
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 
-use crate::canvas::controller::{Gesture, GESTURE, VIEWPORT};
+use crate::canvas::controller::{self, Gesture, VIEWPORT};
 use crate::canvas::scene::EdgeGeom;
 use crate::state::{ContextMenuState, ContextMenuTarget, CONTEXT_MENU, SELECTION};
 
@@ -101,6 +101,11 @@ fn EdgePath(edge: EdgeGeom) -> Element {
                 oncontextmenu: move |ev| {
                     ev.prevent_default();
                     ev.stop_propagation();
+                    // The edge menu's only item deletes the link, so in a
+                    // read-only view there is nothing to show.
+                    if crate::ui_config::read_only() {
+                        return;
+                    }
                     let c = ev.data().client_coordinates();
                     *CONTEXT_MENU.write() = Some(ContextMenuState {
                         target: ContextMenuTarget::Edge(parent, child),
@@ -109,7 +114,7 @@ fn EdgePath(edge: EdgeGeom) -> Element {
                 },
             }
             // Reconnect grab handle at the target end (selected edges only).
-            if selected {
+            if selected && !crate::ui_config::read_only() {
                 circle {
                     cx: "{tx:.1}",
                     cy: "{ty:.1}",
@@ -125,12 +130,12 @@ fn EdgePath(edge: EdgeGeom) -> Element {
                         ev.stop_propagation();
                         let c = ev.data().client_coordinates();
                         let cursor_world = VIEWPORT.read().client_to_world(c.x, c.y);
-                        *GESTURE.write() = Gesture::Reconnect {
+                        controller::arm(Gesture::Reconnect {
                             parent,
                             orig_child: child,
                             cursor_world,
                             over: None,
-                        };
+                        });
                     },
                 }
             }

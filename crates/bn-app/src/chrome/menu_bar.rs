@@ -144,6 +144,21 @@ mod imp {
             (s.doc().auto_update, s.active_tab().data.is_some())
         };
         let panel_open = *SHOW_DATA_PANEL.read();
+        // In a read-only view the menu shows only what `route` would still
+        // accept — same predicate, so the two can never disagree. Submenus
+        // left empty by the filter are dropped entirely.
+        let ro = crate::ui_config::read_only();
+        let menus: Vec<(&'static str, Vec<&'static Item>)> = MENUS
+            .iter()
+            .map(|(title, items)| {
+                let keep: Vec<&'static Item> = items
+                    .iter()
+                    .filter(|it| !ro || crate::chrome::menu::allowed_in_read_only(it.id))
+                    .collect();
+                (*title, keep)
+            })
+            .filter(|(_, items)| !items.is_empty())
+            .collect();
         let checked = move |c: Check| match c {
             Check::None => false,
             Check::AutoUpdate => auto_update,
@@ -155,7 +170,7 @@ mod imp {
             // z-50 keeps the whole bar (titles + dropdowns) above the z-40
             // click-catcher so hover-switching between open menus works.
             div { class: "relative z-50 flex shrink-0 items-center gap-0.5 border-b bg-background px-2 py-1",
-                for (i, (title, items)) in MENUS.iter().enumerate() {
+                for (i, (title, items)) in menus.iter().enumerate() {
                     div { class: "relative",
                         button {
                             class: if is_open == Some(i) { MENU_BTN_OPEN } else { MENU_BTN },
@@ -176,8 +191,10 @@ mod imp {
                             div {
                                 class: "absolute top-full left-0 z-50 mt-1 w-64 rounded-md border \
                                         bg-popover p-1 text-popover-foreground shadow-md",
-                                for it in items.iter() {
-                                    if it.sep_before {
+                                for (j, it) in items.iter().enumerate() {
+                                    // `j > 0`: a filtered submenu must not
+                                    // open with a dangling rule.
+                                    if it.sep_before && j > 0 {
                                         div { class: "my-1 border-t" }
                                     }
                                     button {

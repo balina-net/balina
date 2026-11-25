@@ -355,7 +355,9 @@ pub fn NetworkCanvas() -> Element {
                 }
             }
 
-            crate::canvas::minimap::Minimap { scene: scene.read().clone() }
+            if crate::ui_config::get().map {
+                crate::canvas::minimap::Minimap { scene: scene.read().clone() }
+            }
 
             // ── rubber-band overlay (element space) ─────────────────────
             if let Some((x, y, w, h)) = band_rect {

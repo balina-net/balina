@@ -27,8 +27,12 @@ crates/bn-app/src/state (global Dioxus signals — the only mutation gateway)
 ├── MESSAGES / SHOW_MESSAGES         message log (cap 300)
 ├── TYPING                           not-while-typing hotkey guard
 ├── JOB_PROGRESS / LAST_CASE_DIR     background-job UI state
-└── SHOW_DATA_PANEL / DATA_PANEL_WIDTH / DATA_BANNER / DATA_JOBS / SECTION_PICK
-                                     data panel + background data jobs
+├── SHOW_DATA_PANEL / DATA_PANEL_WIDTH / DATA_BANNER / DATA_JOBS / SECTION_PICK
+│                                    data panel + background data jobs
+└── (crate root) ui_config           process-constant `?ui=` config: a Copy
+                                     struct in a OnceLock, NOT a signal, so
+                                     components branch on it ABOVE their hooks
+                                     (see "Startup view config")
 
 crates/bn-app/src/canvas (the node editor)
 ├── geometry.rs           Pt/Rect, node_size, clip_to_border, Viewport (PURE, tested)
@@ -292,6 +296,43 @@ and log toggles), `MessageLog`
 `use_effect` on `SESSION`. File pickers are `rfd::AsyncFileDialog` in
 `spawn`ed tasks; unsaved-changes confirms use `rfd::AsyncMessageDialog`.
 
+## Startup view config (`?ui=`, web only)
+
+`crate::ui_config` reads one query parameter into a `UiConfig { menu, bar,
+tabs, footer, map, ro }` — the README has the user-facing contract. Desktop
+always gets `Default` (everything visible, editable). It is a `Copy` struct
+behind a `OnceLock`, deliberately not a `GlobalSignal`: it never changes, and
+the gates must be readable *above* a component's hooks, which is only sound
+when the predicate cannot change between renders. Parsing is lenient and
+fail-open, and `parse` takes a `&str` so it unit-tests on every target.
+
+Chrome visibility is conditional mounting at the parent — four `if`s in
+`app.rs`, one in `canvas.rs` for the minimap. No component knows about it.
+
+`ro` is the capability gate, resting on **four chokepoints** plus affordance
+hiding. Register a new edit path here, not at the call site:
+
+| chokepoint | covers |
+|---|---|
+| `chrome::menu::allowed_in_read_only` + the guard in `route` | the native menu, the web menu bar (the same predicate filters `MENUS`), and every hotkey that routes |
+| `state::dialog_allowed_read_only` + the guard in `open_dialog` | every dialog — a blocked one never mounts, so no Apply path exists |
+| `Gesture::mutates()` + `controller::arm` | all seven mutating-gesture arming sites; `finish_gesture` is then unreachable |
+| `state::delete_selection` / `state::begin_note_edit` | the Delete hotkey and the sticky-note inline editor |
+
+Two invariants keep the gate honest, both tested:
+
+1. `Gesture::mutates()` is an exhaustive `match` — a new `Gesture` variant is a
+   **compile error** until it is classified.
+2. The menu-id and dialog lists are **allowlists** — a new menu item or dialog
+   is blocked under `ro` until deliberately added.
+
+Read-only deliberately keeps evidence live (`toggle_finding`,
+`retract_finding`, `retract_all_findings`) plus undo/redo and compile: a
+freshly loaded document has an empty undo stack, so undo can only ever reverse
+a finding. `arm()` drops only the gesture, never the `SELECTION` write beside
+it, so click-to-select and the belief-row evidence click keep working.
+`bn-session` is untouched by all of this — read-only is presentation.
+
 **Data panel** (`data/panel.rs`): right-docked beside the canvas (the
 canvas re-measures itself), resizable from its left edge (280 px to 70% of
 the window; width and visibility are session-only), toggled from Cases >
@@ -331,6 +372,8 @@ plain table handles editor-scale row counts; revisit past ~512 rows.
   viewport transforms, zoom clamp/anchor, fit), `canvas/scene.rs`
   (projection, drag override, bounds), `canvas/validation.rs` (the ported
   cycle/dup/utility/reconnect cases), `canvas/controller.rs` (drag/rubber
-  reducers).
+  reducers + the `Gesture::mutates` read-only classification),
+  `ui_config.rs` (lenient `?ui=` parsing, defaults, fail-open),
+  `chrome/menu.rs` (the read-only menu allowlist).
 - Real-window e2e is deliberately absent; the logic lives in bn-session
   and the pure canvas modules where it's directly testable.

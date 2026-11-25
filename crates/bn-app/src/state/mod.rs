@@ -41,6 +41,15 @@ pub static SELECTION: GlobalSignal<Selection> = Signal::global(Selection::defaul
 /// The sticky note whose text is being edited inline (single slot).
 pub static EDITING_NOTE: GlobalSignal<Option<NoteId>> = Signal::global(|| None);
 
+/// Open the inline editor for `id` — a no-op in a read-only view, so
+/// `NoteEditor` can never mount and `set_note_text` stays unreachable.
+pub fn begin_note_edit(id: NoteId) {
+    if crate::ui_config::read_only() {
+        return;
+    }
+    *EDITING_NOTE.write() = Some(id);
+}
+
 /// Select a freshly added note and open its inline editor (Stickies-style:
 /// a new note is immediately ready to type into).
 pub fn focus_new_note(id: NoteId) {
@@ -99,6 +108,9 @@ pub fn prune_selection() {
 
 /// Delete the current selection as one op (menu item, Delete hotkey).
 pub fn delete_selection() {
+    if crate::ui_config::read_only() {
+        return;
+    }
     prune_selection();
     let (nodes, edges, notes) = {
         let sel = SELECTION.read();
@@ -242,7 +254,25 @@ pub enum DialogDesc {
     SaveAsWeb,
 }
 
+/// Dialogs that still open in a read-only view. An ALLOWLIST: a new dialog
+/// is blocked under `ro` until listed here. These four only read the session
+/// (analysis results, a report, an about box).
+fn dialog_allowed_read_only(d: &DialogDesc) -> bool {
+    matches!(
+        d,
+        DialogDesc::About
+            | DialogDesc::IdSolution { .. }
+            | DialogDesc::Sensitivity
+            | DialogDesc::ArcStrength
+    )
+}
+
 pub fn open_dialog(d: DialogDesc) {
+    // One gate for every dialog. Blocking here keeps the editing dialogs from
+    // mounting at all, so none of their Apply paths is reachable.
+    if crate::ui_config::read_only() && !dialog_allowed_read_only(&d) {
+        return;
+    }
     *DIALOG.write() = Some(d);
 }
 

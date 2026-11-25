@@ -16,6 +16,10 @@ use crate::state::{exec, DATA_BANNER, SESSION, SHOW_DATA_PANEL};
 /// else cancels.
 fn finish_palette_drag(item: PaletteItem, start: (f64, f64), c: (f64, f64)) {
     *GESTURE.write() = Gesture::Idle;
+    // Unreachable once PaletteDrag cannot be armed; cheap backstop.
+    if crate::ui_config::read_only() {
+        return;
+    }
     let moved = ((c.0 - start.0).powi(2) + (c.1 - start.1).powi(2)).sqrt() > 4.0;
     if !moved {
         add_at_center(item);
@@ -97,6 +101,7 @@ pub fn App() -> Element {
         Gesture::PaletteDrag { item, cur_client, .. } => Some((*item, *cur_client)),
         _ => None,
     };
+    let ui = crate::ui_config::get();
     let conflict = SESSION.read().bridge().conflict;
     let data_banner = DATA_BANNER.read().clone();
 
@@ -117,11 +122,11 @@ pub fn App() -> Element {
                     if ev.data().held_buttons().is_empty() {
                         finish_palette_drag(item, start_client, (c.x, c.y));
                     } else {
-                        *GESTURE.write() = Gesture::PaletteDrag {
+                        crate::canvas::controller::arm(Gesture::PaletteDrag {
                             item,
                             start_client,
                             cur_client: (c.x, c.y),
-                        };
+                        });
                     }
                 }
             },
@@ -132,9 +137,15 @@ pub fn App() -> Element {
                     finish_palette_drag(item, start_client, (c.x, c.y));
                 }
             },
-            crate::chrome::menu_bar::MenuBar {}
-            Toolbar {}
-            crate::chrome::tab_bar::TabBar {}
+            if ui.menu {
+                crate::chrome::menu_bar::MenuBar {}
+            }
+            if ui.bar {
+                Toolbar {}
+            }
+            if ui.tabs {
+                crate::chrome::tab_bar::TabBar {}
+            }
             if conflict {
                 div {
                     class: "flex shrink-0 items-center gap-3 border-b border-red-200 \
@@ -181,8 +192,10 @@ pub fn App() -> Element {
                 }
                 crate::data::panel::DataPanel {}
             }
-            StatusBar {}
-            MessageLog {}
+            if ui.footer {
+                StatusBar {}
+                MessageLog {}
+            }
             ContextMenuHost {}
             crate::dialogs::host::DialogHost {}
             crate::ui::ToastHost {}

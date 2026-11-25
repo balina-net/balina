@@ -88,6 +88,24 @@ fn NodeMenu(id: NodeId) -> Element {
         )
     };
 
+    // Read-only keeps evidence live, so "Remove finding" is the only item
+    // that still does anything here.
+    if crate::ui_config::read_only() {
+        if !has_finding {
+            return rsx! {};
+        }
+        return rsx! {
+            button {
+                class: ITEM,
+                onclick: move |_| {
+                    close();
+                    exec(|s| bn_session::ops::evidence::retract_finding(s, id));
+                },
+                "Remove finding"
+            }
+        };
+    }
+
     rsx! {
         button {
             class: ITEM,
@@ -246,36 +264,39 @@ fn NoteMenu(id: NoteId) -> Element {
 
 #[component]
 fn PaneMenu(world: (f64, f64)) -> Element {
+    let ro = crate::ui_config::read_only();
     rsx! {
-        for (kind, label) in [
-            (NodeKind::Chance, "Add chance node"),
-            (NodeKind::Decision, "Add decision node"),
-            (NodeKind::Utility, "Add utility node"),
-        ] {
+        if !ro {
+            for (kind, label) in [
+                (NodeKind::Chance, "Add chance node"),
+                (NodeKind::Decision, "Add decision node"),
+                (NodeKind::Utility, "Add utility node"),
+            ] {
+                button {
+                    class: ITEM,
+                    onclick: move |_| {
+                        close();
+                        exec(|s| {
+                            bn_session::ops::edit::add_node(s, kind, world.0 as f32, world.1 as f32)
+                        });
+                    },
+                    "{label}"
+                }
+            }
             button {
                 class: ITEM,
                 onclick: move |_| {
                     close();
-                    exec(|s| {
-                        bn_session::ops::edit::add_node(s, kind, world.0 as f32, world.1 as f32)
-                    });
+                    if let Some(id) =
+                        exec(|s| bn_session::ops::edit::add_note(s, world.0 as f32, world.1 as f32))
+                    {
+                        crate::state::focus_new_note(id);
+                    }
                 },
-                "{label}"
+                "Add note"
             }
+            div { class: "my-1 border-t" }
         }
-        button {
-            class: ITEM,
-            onclick: move |_| {
-                close();
-                if let Some(id) =
-                    exec(|s| bn_session::ops::edit::add_note(s, world.0 as f32, world.1 as f32))
-                {
-                    crate::state::focus_new_note(id);
-                }
-            },
-            "Add note"
-        }
-        div { class: "my-1 border-t" }
         button {
             class: ITEM,
             onclick: move |_| {
