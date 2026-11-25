@@ -1,9 +1,12 @@
 //! Startup view configuration from the page URL (`?ui={json}`, web only).
 //!
-//! Two independent concerns: which parts of the chrome are visible, and
-//! whether the document is read-only. Hiding is cosmetic; `ro` is the
-//! capability gate (see `chrome::menu::allowed_in_read_only`,
-//! `state::open_dialog` and `canvas::controller::arm`).
+//! Three independent concerns: which parts of the chrome are visible,
+//! whether the document is read-only, and whether the view can be navigated.
+//! Hiding is cosmetic; `ro` is the capability gate (see
+//! `chrome::menu::allowed_in_read_only`, `state::open_dialog` and
+//! `canvas::controller::arm`) and `scroll` the navigation gate (see
+//! `Gesture::navigates`, `controller::zoom_center`/`zoom_reset` and the
+//! canvas wheel handler).
 //!
 //! Process-constant: read once on first access, never written again, so it is
 //! a plain `Copy` struct behind a `OnceLock` rather than a signal — components
@@ -27,11 +30,15 @@ pub struct UiConfig {
     pub map: bool,
     /// Read-only: entering findings still works, nothing else mutates.
     pub ro: bool,
+    /// Pan and zoom. `false` pins the view where fit-view left it: the wheel,
+    /// the middle-drag pan, the zoom hotkeys/buttons and the minimap all stop
+    /// moving it.
+    pub scroll: bool,
 }
 
 impl Default for UiConfig {
     fn default() -> Self {
-        Self { menu: true, bar: true, tabs: true, footer: true, map: true, ro: false }
+        Self { menu: true, bar: true, tabs: true, footer: true, map: true, ro: false, scroll: true }
     }
 }
 
@@ -45,6 +52,11 @@ pub fn get() -> UiConfig {
 /// Shorthand for the most-used predicate.
 pub fn read_only() -> bool {
     get().ro
+}
+
+/// True when the view is pinned: no pan, no zoom.
+pub fn no_scroll() -> bool {
+    !get().scroll
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -81,12 +93,14 @@ pub fn parse(json: &str) -> UiConfig {
     flag(&map, "footer", &mut cfg.footer);
     flag(&map, "map", &mut cfg.map);
     flag(&map, "ro", &mut cfg.ro);
+    flag(&map, "scroll", &mut cfg.scroll);
     cfg
 }
 
 /// Read one boolean key, leaving `cur` alone unless the value reads as a
-/// boolean. Hand-written embed URLs often quote everything, so `"true"` and
-/// `1` are accepted alongside `true`.
+/// boolean. Hand-written embed URLs often quote everything, so `"true"`,
+/// `"on"`, `"yes"` and `1` are accepted alongside `true` (and their
+/// negatives alongside `false`).
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn flag(map: &serde_json::Map<String, serde_json::Value>, key: &str, cur: &mut bool) {
     match map.get(key) {
@@ -97,8 +111,8 @@ fn flag(map: &serde_json::Map<String, serde_json::Value>, key: &str, cur: &mut b
             }
         }
         Some(serde_json::Value::String(s)) => match s.trim().to_ascii_lowercase().as_str() {
-            "true" | "1" | "yes" => *cur = true,
-            "false" | "0" | "no" => *cur = false,
+            "true" | "1" | "yes" | "on" => *cur = true,
+            "false" | "0" | "no" | "off" => *cur = false,
             _ => {}
         },
         _ => {}
@@ -112,14 +126,36 @@ mod tests {
     #[test]
     fn default_shows_everything_and_is_editable() {
         let d = UiConfig::default();
-        assert!(d.menu && d.bar && d.tabs && d.footer && d.map);
+        assert!(d.menu && d.bar && d.tabs && d.footer && d.map && d.scroll);
         assert!(!d.ro);
     }
 
     #[test]
     fn full_example_parses() {
-        let c = parse(r#"{"menu":false,"bar":false,"tabs":false,"footer":false,"map":false,"ro":true}"#);
-        assert_eq!(c, UiConfig { menu: false, bar: false, tabs: false, footer: false, map: false, ro: true });
+        let c = parse(
+            r#"{"menu":false,"bar":false,"tabs":false,"footer":false,"map":false,"ro":true,"scroll":false}"#,
+        );
+        assert_eq!(
+            c,
+            UiConfig {
+                menu: false,
+                bar: false,
+                tabs: false,
+                footer: false,
+                map: false,
+                ro: true,
+                scroll: false,
+            }
+        );
+    }
+
+    #[test]
+    fn scroll_is_independent_of_read_only() {
+        assert_eq!(parse(r#"{"scroll":false}"#), UiConfig { scroll: false, ..Default::default() });
+        assert!(parse(r#"{"ro":true}"#).scroll);
+        assert!(!parse(r#"{"scroll":"off"}"#).scroll);
+        assert!(!parse(r#"{"scroll":"no"}"#).scroll);
+        assert!(!parse(r#"{"scroll":0}"#).scroll);
     }
 
     #[test]
@@ -159,6 +195,8 @@ mod tests {
         assert!(!parse(r#"{"menu":"false"}"#).menu);
         assert!(!parse(r#"{"menu":0}"#).menu);
         assert!(!parse(r#"{"menu":"no"}"#).menu);
+        assert!(!parse(r#"{"menu":"off"}"#).menu);
+        assert!(parse(r#"{"menu":"on"}"#).menu);
     }
 
     #[test]

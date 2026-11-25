@@ -299,7 +299,7 @@ and log toggles), `MessageLog`
 ## Startup view config (`?ui=`, web only)
 
 `crate::ui_config` reads one query parameter into a `UiConfig { menu, bar,
-tabs, footer, map, ro }` — the README has the user-facing contract. Desktop
+tabs, footer, map, ro, scroll }` — the README has the user-facing contract. Desktop
 always gets `Default` (everything visible, editable). It is a `Copy` struct
 behind a `OnceLock`, deliberately not a `GlobalSignal`: it never changes, and
 the gates must be readable *above* a component's hooks, which is only sound
@@ -325,6 +325,23 @@ Two invariants keep the gate honest, both tested:
    **compile error** until it is classified.
 2. The menu-id and dialog lists are **allowlists** — a new menu item or dialog
    is blocked under `ro` until deliberately added.
+
+`scroll:false` is the second gate — it pins the viewport where fit-view left
+it. Same shape as `ro`, one classification plus three chokepoints:
+
+| chokepoint | covers |
+|---|---|
+| `Gesture::navigates()` + `controller::arm` | the middle-button pan (the only navigating gesture) |
+| `controller::zoom_center` / `zoom_reset` | the zoom hotkeys and the toolbar ± / % buttons |
+| the canvas `onwheel` guard + `minimap`'s click | wheel pan, ctrl-wheel/pinch zoom, click-to-center |
+
+`navigates()` is exhaustive for the same reason `mutates()` is. Pinned, the
+canvas also drops its `prevent_default` on the wheel and sets `touch-action:
+auto`, so a page embedding the canvas in an iframe scrolls normally under the
+cursor; the toolbar hides the zoom group (dead buttons) but keeps *Fit view*,
+which restores the pinned framing rather than leaving it. `FIT_REQUEST` is
+unaffected throughout — a pinned view still has to frame the document it
+loads.
 
 Read-only deliberately keeps evidence live (`toggle_finding`,
 `retract_finding`, `retract_all_findings`) plus undo/redo and compile: a

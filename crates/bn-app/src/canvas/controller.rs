@@ -123,14 +123,36 @@ impl Gesture {
             Gesture::Idle | Gesture::Pan { .. } | Gesture::RubberBand { .. } => false,
         }
     }
+
+    /// True if this gesture moves the viewport rather than the document.
+    ///
+    /// Exhaustive for the same reason as `mutates`: a new navigating gesture
+    /// must be classified before it can escape the `scroll` gate.
+    pub fn navigates(&self) -> bool {
+        match self {
+            Gesture::Pan { .. } => true,
+            Gesture::Idle
+            | Gesture::PendingNodeDrag { .. }
+            | Gesture::DragNodes { .. }
+            | Gesture::ResizeNote { .. }
+            | Gesture::RubberBand { .. }
+            | Gesture::Connect { .. }
+            | Gesture::Reconnect { .. }
+            | Gesture::PaletteDrag { .. } => false,
+        }
+    }
 }
 
 /// Arm `g` — unless the view is read-only and committing `g` would write the
-/// document. Pan and rubber-band selection are unaffected. Callers that also
-/// update SELECTION keep doing so: only the gesture is dropped, so
-/// click-to-select still works while dragging does not.
+/// document, or the view is pinned (`scroll:false`) and `g` would move it.
+/// Rubber-band selection is unaffected by both. Callers that also update
+/// SELECTION keep doing so: only the gesture is dropped, so click-to-select
+/// still works while dragging does not.
 pub fn arm(g: Gesture) {
     if g.mutates() && crate::ui_config::read_only() {
+        return;
+    }
+    if g.navigates() && crate::ui_config::no_scroll() {
         return;
     }
     *GESTURE.write() = g;
@@ -158,14 +180,22 @@ pub fn cancel_gesture() {
 }
 
 /// Zoom by `factor` around the viewport center (toolbar buttons, hotkeys).
+/// No-op while the view is pinned.
 pub fn zoom_center(factor: f64) {
+    if crate::ui_config::no_scroll() {
+        return;
+    }
     let mut vp = VIEWPORT.write();
     let (cx, cy) = (vp.size.0 / 2.0, vp.size.1 / 2.0);
     vp.zoom_at_scale(cx, cy, factor);
 }
 
-/// Back to 100%, keeping the view center anchored.
+/// Back to 100%, keeping the view center anchored. No-op while the view is
+/// pinned.
 pub fn zoom_reset() {
+    if crate::ui_config::no_scroll() {
+        return;
+    }
     let mut vp = VIEWPORT.write();
     let (cx, cy) = (vp.size.0 / 2.0, vp.size.1 / 2.0);
     let scale = 1.0 / vp.zoom;
@@ -310,6 +340,19 @@ mod tests {
         ];
         for g in &view_only {
             assert!(!g.mutates(), "{g:?} touches no document state");
+        }
+
+        // The `scroll` gate rests on the complementary classification: `arm`
+        // drops exactly the gestures that would move the viewport.
+        assert!(
+            Gesture::Pan { start_client: (0.0, 0.0), pan_start: (0.0, 0.0) }.navigates(),
+            "panning must be gated in a pinned view"
+        );
+        for g in mutating.iter().chain(&view_only) {
+            if matches!(g, Gesture::Pan { .. }) {
+                continue;
+            }
+            assert!(!g.navigates(), "{g:?} leaves the viewport alone");
         }
     }
 }
