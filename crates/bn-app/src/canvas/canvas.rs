@@ -159,9 +159,13 @@ pub fn NetworkCanvas() -> Element {
     };
 
     let vp = *VIEWPORT.read();
+    let no_scroll = crate::ui_config::no_scroll();
     let transform = vp.world_transform();
     let dot_size = 40.0 * vp.zoom;
     let gesture_now = GESTURE.read().clone();
+    // Pinned: hand touch gestures back to the host page (nothing on the
+    // canvas consumes them — pan/zoom are mouse-driven).
+    let touch_action = if no_scroll { "auto" } else { "none" };
     let cursor = match gesture_now {
         Gesture::Pan { .. } => "grabbing",
         Gesture::RubberBand { .. } => "crosshair",
@@ -184,7 +188,7 @@ pub fn NetworkCanvas() -> Element {
     rsx! {
         div {
             class: "relative h-full w-full overflow-hidden outline-none select-none",
-            style: "cursor: {cursor}; touch-action: none; \
+            style: "cursor: {cursor}; touch-action: {touch_action}; \
                     background-image: radial-gradient(circle, #c8c8c8 1.5px, transparent 1.5px); \
                     background-size: {dot_size:.2}px {dot_size:.2}px; \
                     background-position: {vp.pan.0:.2}px {vp.pan.1:.2}px;",
@@ -200,8 +204,7 @@ pub fn NetworkCanvas() -> Element {
                     Some(MouseButton::Auxiliary) => {
                         let c = data.client_coordinates();
                         let pan_start = VIEWPORT.read().pan;
-                        *GESTURE.write() =
-                            Gesture::Pan { start_client: (c.x, c.y), pan_start };
+                        controller::arm(Gesture::Pan { start_client: (c.x, c.y), pan_start });
                     }
                     Some(MouseButton::Primary) => {
                         if controller::is_connecting() {
@@ -301,6 +304,11 @@ pub fn NetworkCanvas() -> Element {
             },
 
             onwheel: move |ev| {
+                // Pinned view: let the wheel through, so a page embedding the
+                // canvas in an iframe still scrolls under the cursor.
+                if no_scroll {
+                    return;
+                }
                 ev.prevent_default();
                 let data = ev.data();
                 let (dx, dy) = match data.delta() {

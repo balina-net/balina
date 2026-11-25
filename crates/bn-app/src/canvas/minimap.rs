@@ -1,5 +1,6 @@
 //! Minimap: scene bounds scaled into a fixed box, node rects tinted by
-//! kind, the current viewport as a dashed rect; click to center the view.
+//! kind, the current viewport as a dashed rect; click to center the view
+//! (inert while the view is pinned, `scroll:false`).
 //! Rewritten from the upstream WorkflowMinimap over measured bounds instead
 //! of hardcoded world constants.
 
@@ -65,6 +66,10 @@ pub fn Minimap(scene: Scene) -> Element {
             onmousedown: move |ev| ev.stop_propagation(),
             onclick: move |ev| {
                 ev.stop_propagation();
+                // Pinned view: the minimap stays an overview, not a control.
+                if crate::ui_config::no_scroll() {
+                    return;
+                }
                 let e = ev.data().element_coordinates();
                 let wx = bounds.x + (e.x - PAD) / scale;
                 let wy = bounds.y + (e.y - PAD) / scale;

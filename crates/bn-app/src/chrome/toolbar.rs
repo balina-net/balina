@@ -86,6 +86,9 @@ pub fn Toolbar() -> Element {
     // that edit the document (palette, per-node precision, auto-update) and
     // keep compile, fit, zoom and the data panel.
     let ro = crate::ui_config::read_only();
+    // Pinned view (`scroll:false`): the zoom group goes too. Fit view stays —
+    // it restores the pinned framing rather than leaving it.
+    let no_scroll = crate::ui_config::no_scroll();
 
     rsx! {
         div { class: "flex shrink-0 items-center gap-2 border-b px-2 py-1",
@@ -174,25 +177,28 @@ pub fn Toolbar() -> Element {
                 "⛶ Fit view"
             }
             div { class: "ml-auto flex items-center gap-1",
-                button {
-                    class: BTN,
-                    title: "Zoom out (Cmd/Ctrl+-)",
-                    onclick: move |_| controller::zoom_center(1.0 / 1.25),
-                    "−"
+                // Pinned view: the zoom controls would be dead buttons.
+                if !no_scroll {
+                    button {
+                        class: BTN,
+                        title: "Zoom out (Cmd/Ctrl+-)",
+                        onclick: move |_| controller::zoom_center(1.0 / 1.25),
+                        "−"
+                    }
+                    button {
+                        class: "w-12 rounded-md px-1 text-center text-xs text-muted-foreground hover:bg-accent",
+                        title: "Reset zoom to 100% (Cmd/Ctrl+0)",
+                        onclick: move |_| controller::zoom_reset(),
+                        "{zoom_pct}%"
+                    }
+                    button {
+                        class: BTN,
+                        title: "Zoom in (Cmd/Ctrl+=)",
+                        onclick: move |_| controller::zoom_center(1.25),
+                        "+"
+                    }
+                    div { class: "mx-1 h-5 w-px bg-border" }
                 }
-                button {
-                    class: "w-12 rounded-md px-1 text-center text-xs text-muted-foreground hover:bg-accent",
-                    title: "Reset zoom to 100% (Cmd/Ctrl+0)",
-                    onclick: move |_| controller::zoom_reset(),
-                    "{zoom_pct}%"
-                }
-                button {
-                    class: BTN,
-                    title: "Zoom in (Cmd/Ctrl+=)",
-                    onclick: move |_| controller::zoom_center(1.25),
-                    "+"
-                }
-                div { class: "mx-1 h-5 w-px bg-border" }
                 // The icon shows the action; greyed out while the tab has no data.
                 button {
                     class: "{BTN} disabled:opacity-40",
